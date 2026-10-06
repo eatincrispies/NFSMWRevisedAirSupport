@@ -4,7 +4,7 @@
 
 A mod for `Most Wanted` that brings back the police helicopter's `unused radio speech` and fixes the police radio.
 
-## Restore
+## Restores
 
 - `Unused ram speech` for the helicopter. The pilot now switches between his normal and intense lines.
 - `Unused search pattern speech.` When the helicopter loses you or the chase goes into cooldown, the pilot calls a search pattern.
