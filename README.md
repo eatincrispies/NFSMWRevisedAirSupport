@@ -1,3 +1,5 @@
+![MW: Revised Air Support](thumbnail.png)
+
 # MW: Revised Air Support
 
 A mod for `Most Wanted` that brings back the police helicopter's `unused radio speech` and fixes the police radio.
