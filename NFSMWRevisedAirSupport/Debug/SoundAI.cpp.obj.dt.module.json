@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "revision": 0,
+    "rules": [
+        {
+            "primary-output": "Debug\\SoundAI.obj",
+            "outputs": [
+                "Debug\\SoundAI.cpp.obj.dt.module.json",
+                "Debug\\SoundAI.cpp.obj.dt.d.json"
+            ],
+            "requires": []
+        }
+    ]
+}

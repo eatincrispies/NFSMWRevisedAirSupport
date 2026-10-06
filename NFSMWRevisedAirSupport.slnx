@@ -1,0 +1,10 @@
+<Solution>
+  <Configurations>
+    <BuildType Name="Debug" />
+    <BuildType Name="Release" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Project Path="NFSMWRevisedAirSupport/NFSMWRevisedAirSupport.vcxproj" Id="3f6b2c1e-8d4a-4e7b-9c25-6a1d0e9b7f43">
+    <Platform Solution="*|x86" Project="Win32" />
+  </Project>
+</Solution>
