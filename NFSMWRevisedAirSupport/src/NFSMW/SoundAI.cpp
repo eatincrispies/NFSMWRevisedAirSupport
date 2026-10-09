@@ -15,7 +15,7 @@
 #endif
 #include "SoundAI.hpp"
 
-#define TIMER_SHIFT_VALUE_INT 4000
+#define HELI_FUEL_CRITICAL_TIME 8.0f
 
 namespace Log {
 
@@ -119,7 +119,7 @@ namespace Patch {
         };
 
         Original gOriginals[kMostPatches] = {};
-        int      gCount = 0;
+        int      gCount                   = 0;
 
         uint32_t CallOffset(uintptr_t call, uintptr_t target) {
             return static_cast<uint32_t>(target) - static_cast<uint32_t>(call + 5);
@@ -230,14 +230,10 @@ namespace {
 
     constexpr const char* kVersion = "V1.0.0";
 
-    constexpr uintptr_t kWorldTimer                        = 0x00925AE8u;
-    constexpr uintptr_t kgHeliVehicle                      = 0x0090D61Cu;
     constexpr uintptr_t kSFXCTL_Pathfinder_m_curinteractive = 0x009121E8u;
-    constexpr uintptr_t kSingleton_SoundAI_mInstance       = 0x00993CC8u;
-    constexpr uintptr_t kManager_m_SpeechModule            = 0x0099222Cu;
-    constexpr uintptr_t kManager_mGlobalHistory            = 0x00992718u;
-    constexpr uintptr_t kManager_mEvents                   = 0x00993390u;
-    constexpr uintptr_t kPlayerViewPrecipitation           = 0x009196B8u;
+    constexpr uintptr_t kSingleton_SoundAI_mInstance        = 0x00993CC8u;
+    constexpr uintptr_t kManager_mGlobalHistory             = 0x00992718u;
+    constexpr uintptr_t kPlayerViewPrecipitation            = 0x009196B8u;
 
     constexpr uintptr_t kObject_IList_Find                    = 0x005D59F0u;
     constexpr uintptr_t kISimable_FindInstance                = 0x0041AD40u;
@@ -246,13 +242,19 @@ namespace {
     constexpr uintptr_t kAttrib_Instance_GetAttributePointer  = 0x00454810u;
     constexpr uintptr_t kEventHistory_Find                    = 0x004CB3F0u;
     constexpr uintptr_t kManager_ScheduleSpeechPartII         = 0x00713B20u;
+    constexpr uintptr_t kManager_NotifyEventCompletion        = 0x00712BF0u;
     constexpr uintptr_t kManager_IsCopSpeechBusy              = 0x007040C0u;
+    constexpr uintptr_t kManager_IsQueued                     = 0x00709D00u;
+    constexpr uintptr_t kManager_IsCopSpeechPlaying           = 0x006FF320u;
     constexpr uintptr_t kManager_CanPlayback                  = 0x00704490u;
     constexpr uintptr_t kStrategyFlow_MessageReqBackup        = 0x007048C0u;
+    constexpr uintptr_t kSoundAI_GetRandomActiveCop           = 0x007153B0u;
+    constexpr uintptr_t kSoundAI_UpdateStateMachines          = 0x00701090u;
     constexpr uintptr_t kSoundAI_FindClosestCop               = 0x00708390u;
+    constexpr uintptr_t kSoundAI_AddNewHeli                   = 0x0070DA60u;
     constexpr uintptr_t kMiscSpeech_LostSuspect               = 0x0071D960u;
+    constexpr uintptr_t kEAXCharacter_SetHandle               = 0x007001D0u;
     constexpr uintptr_t kEAXCharacter_DriverHistory           = 0x00717020u;
-    constexpr uintptr_t kEAXCop_Update                        = 0x00707BF0u;
     constexpr uintptr_t kEAXCop_VehicleReport                 = 0x00718150u;
     constexpr uintptr_t kEAXCop_CallForBackup                 = 0x00718640u;
     constexpr uintptr_t kEAXCop_StrategyReset                 = 0x00718D50u;
@@ -265,7 +267,7 @@ namespace {
     constexpr uintptr_t kEAXCop_WeatherReport                 = 0x00719B00u;
     constexpr uintptr_t kEAXCop_CallForRB                     = 0x007196C0u;
     constexpr uintptr_t kEAXDispatch_BackupReply              = 0x00717090u;
-    constexpr uintptr_t kEAXDispatch_BackupETA                = 0x00717860u;
+    constexpr uintptr_t kEAXDispatch_PursuitUpdate            = 0x00717140u;
     constexpr uintptr_t kEAXDispatch_PursuitEscalationGeneric = 0x00717190u;
     constexpr uintptr_t kEAXDispatch_RBUpdate                 = 0x007176D0u;
     constexpr uintptr_t kEAXAirSupport_Update                 = 0x00709F50u;
@@ -277,6 +279,7 @@ namespace {
     constexpr uintptr_t kEAXCopVTable        = 0x008B1FA0u;
     constexpr uintptr_t kEAXAirSupportVTable = 0x008B2278u;
 
+    constexpr unsigned kSetHandleSlot          = 0x2Cu;
     constexpr unsigned kUpdateSlot             = 0x54u;
     constexpr unsigned kVehicleReportSlot      = 0x84u;
     constexpr unsigned kCallForBackupSlot      = 0x98u;
@@ -292,21 +295,22 @@ namespace {
     constexpr unsigned kSwarmingSlot           = 0x210u;
     constexpr unsigned kHazardAlertSlot        = 0x214u;
 
-    constexpr uint8_t   kScheduleSpeechPartIIEntry[6]   = { 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00 };
-    constexpr uint8_t   kCanPlaybackEntry[6]            = { 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00 };
-    constexpr uint8_t   kReturnTrue[6]                  = { 0xB0, 0x01, 0xC3, 0x90, 0x90, 0x90 };
-    constexpr uint8_t   kMessageReqBackupEntry[7]       = { 0x8B, 0x44, 0x24, 0x04, 0x8B, 0x50, 0x10 };
-    constexpr int       kRoadblockBackupType            = 0x40;
-    constexpr int       kStrategyBackupType             = 0x10;
-    constexpr uintptr_t kOnCollisionBailout             = 0x0071BCF5u;
-    constexpr uint8_t   kOnCollisionBailoutCode[6]      = { 0xFF, 0x90, 0x04, 0x01, 0x00, 0x00 };
-    constexpr uintptr_t kEAXAirSupportUpdateFuelCheck   = 0x00709F75u;
+    constexpr uintptr_t kOnTaskUpdateStateMachinesCall        = 0x0072162Cu;
+    constexpr uintptr_t kSyncCarsToActorsAddNewHeliCall       = 0x007213EBu;
+    constexpr uintptr_t kDealWithDeadAirPursuitUpdateCall     = 0x0071C988u;
+    constexpr uintptr_t kTerminatePursuitLostSuspectCall      = 0x0071F758u;
+    constexpr uintptr_t kBailoutGetCauseOfBailoutCall         = 0x00717C0Du;
+    constexpr uintptr_t kOnCollisionBailout                   = 0x0071BCF5u;
+    constexpr uint8_t   kOnCollisionBailoutCode[6]            = { 0xFF, 0x90, 0x04, 0x01, 0x00, 0x00 };
+    constexpr uint8_t   kNotifyEventCompletionEntry[8]        = { 0x83, 0xEC, 0x14, 0x56, 0x8B, 0x74, 0x24, 0x1C };
+    constexpr uint8_t   kMessageReqBackupEntry[7]             = { 0x8B, 0x44, 0x24, 0x04, 0x8B, 0x50, 0x10 };
+    constexpr uint8_t   kCanPlaybackEntry[6]                  = { 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00 };
+    constexpr uint8_t   kReturnTrue[6]                        = { 0xB0, 0x01, 0xC3, 0x90, 0x90, 0x90 };
+    constexpr uintptr_t kEAXAirSupportUpdateFuelCheck         = 0x00709F75u;
     constexpr uint8_t   kEAXAirSupportUpdateFuelCheckCode[40] = {
         0x8B, 0x16, 0x8B, 0xCE, 0xFF, 0x52, 0x28, 0x50, 0xE8, 0xBE, 0x0D, 0xD1, 0xFF, 0x8B, 0x48, 0x04, 0x83, 0xC4, 0x04, 0x68,
         0x60, 0x40, 0x40, 0x00, 0xE8, 0x5E, 0xBA, 0xEC, 0xFF, 0x85, 0xC0, 0x74, 0x1E, 0x8B, 0x10, 0x8B, 0xC8, 0xFF, 0x52, 0x34,
     };
-    constexpr uintptr_t kBailoutGetCauseOfBailoutCall   = 0x00717C0Du;
-    constexpr uintptr_t kTerminatePursuitLostSuspectCall = 0x0071F758u;
 
     constexpr uintptr_t kSampleHeaders     = 0x009C2C10u;
     constexpr uintptr_t kSampleHeaderCount = 0x009C2C1Cu;
@@ -317,42 +321,35 @@ namespace {
     constexpr unsigned  kHeaderTakeList    = 0x0Cu;
     constexpr uint8_t   kDimensionMask     = 0x7Fu;
     constexpr uint8_t   kUnusedTag         = 7u;
+    constexpr unsigned  kMostHiddenTakes   = 4u;
     constexpr uintptr_t kTakeOffsetCall    = 0x00833EEBu;
     constexpr uintptr_t kTakeOffset        = 0x008349FAu;
     constexpr uintptr_t kTakeCheckCall     = 0x0083344Cu;
     constexpr uintptr_t kTakeCheck         = 0x00833087u;
 
-    constexpr uint32_t kspeech        = 0xC593DD47u;
-    constexpr uint32_t kDepFollow     = 0xC8C5D475u;
-    constexpr uint32_t kreqLOS        = 0xE0241FC1u;
-    constexpr uint32_t kOnScreenOnly  = 0x4B331604u;
-    constexpr uint32_t kBackup_CallForBUSpeech           = 0xA4911F22u;
-    constexpr uint32_t kBackup_DispBackupReplySpeech     = 0x732FA60Au;
-    constexpr uint32_t kAnytimeEvents_Unit911ReplySpeech = 0xC6B1C631u;
-    constexpr uint32_t kAnytimeEvents_RegainVisualSpeech = 0xFD58F23Du;
-    constexpr uint32_t kStaticRoadblock_CallForRBSpeech  = 0x26EF7810u;
-    constexpr uint32_t kHeliSpecific_HeliBailoutSpeech   = 0x602ACE63u;
-    constexpr unsigned kCollectionLayout    = 0x18u;
-    constexpr uint16_t kMostDepFollows      = 16u;
-    constexpr uint16_t kDepFollowSize       = 0x0Cu;
-    constexpr uint16_t kWideArrayHeader     = 0x8000u;
-    constexpr float    kLongestExpiry       = 30.0f;
-    constexpr float    kRelaxedExpiry       = 20.0f;
-    constexpr float    kLongestCullingRange = 100000.0f;
-    constexpr float    kRelaxedCullingRange = 100000.0f;
+    constexpr uint32_t kSpeechClassKey                = 0xC593DD47u;
+    constexpr uint32_t kDepFollowKey                  = 0xC8C5D475u;
+    constexpr uint32_t kReqLOSKey                     = 0xE0241FC1u;
+    constexpr uint32_t kOnScreenOnlyKey               = 0x4B331604u;
+    constexpr uint32_t kBackup_CallForBUKey           = 0xA4911F22u;
+    constexpr uint32_t kAnytimeEvents_Unit911ReplyKey = 0xC6B1C631u;
+    constexpr uint32_t kAnytimeEvents_RegainVisualKey = 0xFD58F23Du;
+    constexpr uint32_t kStaticRoadblock_CallForRBKey  = 0x26EF7810u;
+    constexpr uint32_t kHeliSpecific_HeliBailoutKey   = 0x602ACE63u;
+    constexpr unsigned kCollectionLayout              = 0x18u;
+    constexpr uint16_t kMostDepFollows                = 16u;
+    constexpr uint16_t kDepFollowSize                 = 0x0Cu;
+    constexpr uint16_t kWideArrayHeader               = 0x8000u;
+    constexpr float    kLongestExpiry                 = 30.0f;
+    constexpr float    kRelaxedExpiry                 = 20.0f;
+    constexpr float    kLongestCullingRange           = 100000.0f;
+    constexpr float    kRelaxedCullingRange           = 100000.0f;
 
-    constexpr uint8_t  kLinePriority      = 100u;
-    constexpr uint8_t  kInterruptPriority = 200u;
-    constexpr float    HELI_FUEL_CRITICAL_TIME = 8.0f;
-    constexpr float    kFullHealth        = 1.0f;
-
-    constexpr int      kAirSupportCallers[] = { Speech::Primary1, Speech::Primary2, Speech::Primary3, Speech::Cross };
-    constexpr unsigned kMostCallers         = 32u;
-    constexpr unsigned kMostActors          = 64u;
-    constexpr unsigned kMostQueuedEvents    = 256u;
-    constexpr unsigned kMostHiddenTakes     = 4u;
-    constexpr int      kCopSpeechModule     = 1;
-    constexpr int      kEventQueues         = 4;
+    constexpr int     kAllEventQueues      = 4;
+    constexpr int     kPrimaryCops         = 1;
+    constexpr int     kRoadblockBackupType = 0x40;
+    constexpr int     kStrategyBackupType  = 0x10;
+    constexpr float   kFullHealth          = 1.0f;
 
     constexpr uint16_t kHeliCheckInSample       = 0xC4u;
     constexpr int      kBackupReplyTakes        = 4;
@@ -366,36 +363,29 @@ namespace {
     constexpr unsigned kOddMultipleSuspectsTake = 11u;
     constexpr uint8_t  kMultipleSuspectsTag     = 1u;
 
-    constexpr unsigned int kRetry               = 1u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kLineTimeout         = 25u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kRadioHoldTimeout    = 20u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kRuleRelaxTime       = 25u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kBailoutSettle       = TIMER_SHIFT_VALUE_INT / 4u;
-    constexpr unsigned int kTunnelAlertDelay    = 1u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kRegainVisualRelax   = 10u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kSpotWindow          = 15u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kSpotSearchWindow    = 5u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kSpotQuiet           = 10u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kCheckInGiveUp       = 45u * TIMER_SHIFT_VALUE_INT;
-    constexpr int          kAirSupportTries     = 3;
-    constexpr unsigned int kAirSupportGiveUp    = 15u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kRoadblockWait       = 120u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kRoadblockRequestWindow = 10u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kRoadblockGiveUp     = 30u * TIMER_SHIFT_VALUE_INT;
-    constexpr int          kRoadblockTries      = 3;
-    constexpr unsigned int kHiddenTakeTimeout   = 30u * TIMER_SHIFT_VALUE_INT;
     constexpr int          kDriverHistoryMinHeat = 5;
-    constexpr unsigned int kDriverHistoryWindow = 60u * TIMER_SHIFT_VALUE_INT;
-    constexpr int          kHeliMinHeat         = 4;
-    constexpr unsigned     kBackupReplyChance   = 4u;
-    constexpr unsigned int kBackupWindow        = 15u * TIMER_SHIFT_VALUE_INT;
-    constexpr int          kDrivingLineMinHeat  = 3;
-    constexpr float        kDrivingLineMinSpeed = 45.0f;
-    constexpr unsigned int kDrivingLineGap      = 60u * TIMER_SHIFT_VALUE_INT;
-    constexpr unsigned int kUpdateReplyWindow   = 30u * TIMER_SHIFT_VALUE_INT;
-    constexpr float        kThemeSettleSeconds  = 30.0f;
-    constexpr unsigned int kVehicleReportWindow = 45u * TIMER_SHIFT_VALUE_INT;
-    constexpr float        kRainReportLevel     = 0.25f;
+    constexpr int          kHeliMinHeat          = 4;
+    constexpr unsigned     kBackupReplyChance    = 4u;
+    constexpr int          kDrivingLineMinHeat   = 3;
+    constexpr float        kDrivingLineMinSpeed  = 45.0f;
+    constexpr float        kRainReportLevel      = 0.25f;
+
+    enum AirSupportFlags : unsigned int {
+        HELI_DOWN        = 1u << 0,
+        BAILOUT_REQ      = 1u << 1,
+        NEW_HELI_SPOT    = 1u << 2,
+        AIR_SUPPORT_REQ  = 1u << 3,
+        RB_CALLED        = 1u << 4,
+        HISTORY_REQ      = 1u << 5,
+        BACKUP_CALLED    = 1u << 6,
+        BACKUP_REPLYING  = 1u << 7,
+        DRIVING_LINE_REQ = 1u << 8,
+        THEME_KNOWN      = 1u << 9,
+        THEME_BROADCAST  = 1u << 10,
+        RAIN_REPORTED    = 1u << 11,
+    };
+
+    enum class SpotLine { RegainVisual, Spotted };
 
     struct RoadblockUpdate {
         Csis::Type_yes_no         yes_no;
@@ -411,47 +401,44 @@ namespace {
 
     struct SpeechEvent {
         const char*        name;
-        uintptr_t          iid;
-        uint32_t           crcs;
-        uintptr_t          fh;
+        uintptr_t          interfaceId;
+        uint32_t           interfaceCrcs;
+        uintptr_t          functionHandle;
         uintptr_t          function;
-        unsigned           pushes;
+        unsigned           pushOffset;
         SPCHType_1_EventID id;
 
         Csis::InterfaceId& Id() const {
-            return Game::Global<Csis::InterfaceId>(iid);
+            return Game::Global<Csis::InterfaceId>(interfaceId);
         }
 
         Csis::FunctionHandle& Handle() const {
-            return Game::Global<Csis::FunctionHandle>(fh);
+            return Game::Global<Csis::FunctionHandle>(functionHandle);
         }
 
         bool Verify() const;
         bool VerifyVirtual(uintptr_t vtable, unsigned slot) const;
     };
 
-    constexpr SpeechEvent kAnytimeEvents_IntentToRam       = { "AnytimeEvents_IntentToRam",       0x00901E5Cu, 0x6C5E5BA7u, 0x00992544u, kEAXCop_IntentToRam,                   0x43u,  kSPCH1_EventID_IntentToRam };
-    constexpr SpeechEvent kOutcome_StrategyReset           = { "Outcome_StrategyReset",           0x00901D84u, 0x4EA05BA7u, 0x0099242Cu, kEAXCop_StrategyReset,                 0x42u,  kSPCH1_EventID_StrategyReset };
-    constexpr SpeechEvent kAnytimeEvents_LostSuspect       = { "AnytimeEvents_LostSuspect",       0x00901E1Cu, 0x34A45BA7u, 0x009924ECu, kMiscSpeech_LostSuspect,               0x6Fu,  kSPCH1_EventID_LostSuspect };
-    constexpr SpeechEvent kHeliSpecific_HeliBailout        = { "HeliSpecific_HeliBailout",        0x00901EDCu, 0x23945BA7u, 0x009924D4u, kEAXAirSupport_Bailout,                0x13u,  kSPCH1_EventID_HeliBailout };
-    constexpr SpeechEvent kHeliSpecific_HeliHazardAlert    = { "HeliSpecific_HeliHazardAlert",    0x00901EF4u, 0x4AFB5BA7u, 0x0099235Cu, kEAXAirSupport_HazardAlert,            0x0Bu,  kSPCH1_EventID_HeliHazardAlert };
-    constexpr SpeechEvent kAnytimeEvents_RegainVisual      = { "AnytimeEvents_RegainVisual",      0x00901E14u, 0x51D85BA7u, 0x0099240Cu, kEAXCop_RegainVisual,                  0x43u,  kSPCH1_EventID_RegainVisual };
-    constexpr SpeechEvent kAnytimeEvents_Spotted           = { "AnytimeEvents_Spotted",           0x00901E94u, 0x0CB35BA7u, 0x00992524u, kEAXCop_Spotted,                       0x30u,  kSPCH1_EventID_Spotted };
-    constexpr SpeechEvent kAnytimeEvents_Unit911Reply      = { "AnytimeEvents_Unit911Reply",      0x00901DF4u, 0x383D5BA7u, 0x009926CCu, kEAXCop_Reply911,                      0x05u,  kSPCH1_EventID_Unit911Reply };
-    constexpr SpeechEvent kBackup_CallForBU                = { "Backup_CallForBU",                0x00901C84u, 0x398D5BA7u, 0x00992564u, kEAXCop_CallForBackup,                 0x1Fu,  kSPCH1_EventID_CallForBU };
-    constexpr SpeechEvent kBackup_DispBackupReply          = { "Backup_DispBackupReply",          0x00901C94u, 0x5C2F5BA7u, 0x009926B0u, kEAXDispatch_BackupReply,              0x4Au,  kSPCH1_EventID_DispBackupReply };
-    constexpr SpeechEvent kBackup_DispBUETA                = { "Backup_DispBUETA",                0x00901CA4u, 0x3C9E5BA7u, 0x00992464u, kEAXDispatch_BackupETA,                0x12Cu, kSPCH1_EventID_DispBUETA };
-    constexpr SpeechEvent kHeliSpecific_HeliSwarming       = { "HeliSpecific_HeliSwarming",       0x00901EE4u, 0x22745BA7u, 0x00992474u, kEAXAirSupport_Swarming,               0x05u,  kSPCH1_EventID_HeliSwarming };
-    constexpr SpeechEvent kStaticRoadblock_CallForRB       = { "StaticRoadblock_CallForRB",       0x00901CD4u, 0x7D0E5BA7u, 0x00992594u, kEAXCop_CallForRB,                     0x32u,  kSPCH1_EventID_CallForRB };
-    constexpr SpeechEvent kStaticRoadblock_DispRBUpdate    = { "StaticRoadblock_DispRBUpdate",    0x00901CF4u, 0x7B7F5BA7u, 0x009926F4u, kEAXDispatch_RBUpdate,                 0x2Eu,  kSPCH1_EventID_DispRBUpdate };
-    constexpr SpeechEvent kAnytimeEvents_DriverHistory     = { "AnytimeEvents_DriverHistory",     0x00901E84u, 0x689E5BA7u, 0x0099231Cu, kEAXCharacter_DriverHistory,           0x07u,  kSPCH1_EventID_DriverHistory };
-    constexpr SpeechEvent kAnytimeEvents_PursuitUpdateRep  = { "AnytimeEvents_PursuitUpdateRep",  0x00901DD4u, 0x795D5BA7u, 0x009926D8u, kEAXCop_PursuitUpdateReply,            0x05u,  kSPCH1_EventID_PursuitUpdateRep };
-    constexpr SpeechEvent kAnytimeEvents_SuspectBehaviour  = { "AnytimeEvents_SuspectBehaviour",  0x00901E7Cu, 0x688B5BA7u, 0x00993C80u, kEAXCop_SuspectBehavior,               0x23u,  kSPCH1_EventID_SuspectBehaviour };
-    constexpr SpeechEvent kAnytimeEvents_DispPursEscGen    = { "AnytimeEvents_DispPursEscGen",    0x00901E3Cu, 0x6BAC5BA7u, 0x0099237Cu, kEAXDispatch_PursuitEscalationGeneric, 0x23u,  kSPCH1_EventID_DispPursEscGen };
-    constexpr SpeechEvent kSetup_VehicleReport             = { "Setup_VehicleReport",             0x00901C1Cu, 0x466D5BA7u, 0x0099246Cu, kEAXCop_VehicleReport,                 0x1C4u, kSPCH1_EventID_VehicleReport };
-    constexpr SpeechEvent kAnytimeEvents_WeatherReport     = { "AnytimeEvents_WeatherReport",     0x00901EA4u, 0x7F435BA7u, 0x0099236Cu, kEAXCop_WeatherReport,                 0x05u,  kSPCH1_EventID_WeatherReport };
-    constexpr SpeechEvent kSetup_InitialCallForBU          = { "Setup_InitialCallForBU",          0x00901C74u, 0u,          0u,          0u,                                    0u,     kSPCH1_EventID_InitialCallForBU };
-    constexpr SpeechEvent kAnytimeEvents_DispPursuitUpdate = { "AnytimeEvents_DispPursuitUpdate", 0x00901DCCu, 0u,          0u,          0u,                                    0u,     kSPCH1_EventID_DispPursuitUpdate };
+    constexpr SpeechEvent kAnytimeEvents_IntentToRam      = { "AnytimeEvents_IntentToRam",      0x00901E5Cu, 0x6C5E5BA7u, 0x00992544u, kEAXCop_IntentToRam,                   0x43u,  kSPCH1_EventID_IntentToRam };
+    constexpr SpeechEvent kOutcome_StrategyReset          = { "Outcome_StrategyReset",          0x00901D84u, 0x4EA05BA7u, 0x0099242Cu, kEAXCop_StrategyReset,                 0x42u,  kSPCH1_EventID_StrategyReset };
+    constexpr SpeechEvent kAnytimeEvents_LostSuspect      = { "AnytimeEvents_LostSuspect",      0x00901E1Cu, 0x34A45BA7u, 0x009924ECu, kMiscSpeech_LostSuspect,               0x6Fu,  kSPCH1_EventID_LostSuspect };
+    constexpr SpeechEvent kHeliSpecific_HeliBailout       = { "HeliSpecific_HeliBailout",       0x00901EDCu, 0x23945BA7u, 0x009924D4u, kEAXAirSupport_Bailout,                0x13u,  kSPCH1_EventID_HeliBailout };
+    constexpr SpeechEvent kHeliSpecific_HeliHazardAlert   = { "HeliSpecific_HeliHazardAlert",   0x00901EF4u, 0x4AFB5BA7u, 0x0099235Cu, kEAXAirSupport_HazardAlert,            0x0Bu,  kSPCH1_EventID_HeliHazardAlert };
+    constexpr SpeechEvent kAnytimeEvents_RegainVisual     = { "AnytimeEvents_RegainVisual",     0x00901E14u, 0x51D85BA7u, 0x0099240Cu, kEAXCop_RegainVisual,                  0x43u,  kSPCH1_EventID_RegainVisual };
+    constexpr SpeechEvent kAnytimeEvents_Spotted          = { "AnytimeEvents_Spotted",          0x00901E94u, 0x0CB35BA7u, 0x00992524u, kEAXCop_Spotted,                       0x30u,  kSPCH1_EventID_Spotted };
+    constexpr SpeechEvent kAnytimeEvents_Unit911Reply     = { "AnytimeEvents_Unit911Reply",     0x00901DF4u, 0x383D5BA7u, 0x009926CCu, kEAXCop_Reply911,                      0x05u,  kSPCH1_EventID_Unit911Reply };
+    constexpr SpeechEvent kBackup_CallForBU               = { "Backup_CallForBU",               0x00901C84u, 0x398D5BA7u, 0x00992564u, kEAXCop_CallForBackup,                 0x1Fu,  kSPCH1_EventID_CallForBU };
+    constexpr SpeechEvent kBackup_DispBackupReply         = { "Backup_DispBackupReply",         0x00901C94u, 0x5C2F5BA7u, 0x009926B0u, kEAXDispatch_BackupReply,              0x4Au,  kSPCH1_EventID_DispBackupReply };
+    constexpr SpeechEvent kHeliSpecific_HeliSwarming      = { "HeliSpecific_HeliSwarming",      0x00901EE4u, 0x22745BA7u, 0x00992474u, kEAXAirSupport_Swarming,               0x05u,  kSPCH1_EventID_HeliSwarming };
+    constexpr SpeechEvent kStaticRoadblock_CallForRB      = { "StaticRoadblock_CallForRB",      0x00901CD4u, 0x7D0E5BA7u, 0x00992594u, kEAXCop_CallForRB,                     0x32u,  kSPCH1_EventID_CallForRB };
+    constexpr SpeechEvent kStaticRoadblock_DispRBUpdate   = { "StaticRoadblock_DispRBUpdate",   0x00901CF4u, 0x7B7F5BA7u, 0x009926F4u, kEAXDispatch_RBUpdate,                 0x2Eu,  kSPCH1_EventID_DispRBUpdate };
+    constexpr SpeechEvent kAnytimeEvents_DriverHistory    = { "AnytimeEvents_DriverHistory",    0x00901E84u, 0x689E5BA7u, 0x0099231Cu, kEAXCharacter_DriverHistory,           0x07u,  kSPCH1_EventID_DriverHistory };
+    constexpr SpeechEvent kAnytimeEvents_PursuitUpdateRep = { "AnytimeEvents_PursuitUpdateRep", 0x00901DD4u, 0x795D5BA7u, 0x009926D8u, kEAXCop_PursuitUpdateReply,            0x05u,  kSPCH1_EventID_PursuitUpdateRep };
+    constexpr SpeechEvent kAnytimeEvents_SuspectBehaviour = { "AnytimeEvents_SuspectBehaviour", 0x00901E7Cu, 0x688B5BA7u, 0x00993C80u, kEAXCop_SuspectBehavior,               0x23u,  kSPCH1_EventID_SuspectBehaviour };
+    constexpr SpeechEvent kAnytimeEvents_DispPursEscGen   = { "AnytimeEvents_DispPursEscGen",   0x00901E3Cu, 0x6BAC5BA7u, 0x0099237Cu, kEAXDispatch_PursuitEscalationGeneric, 0x23u,  kSPCH1_EventID_DispPursEscGen };
+    constexpr SpeechEvent kSetup_VehicleReport            = { "Setup_VehicleReport",            0x00901C1Cu, 0x466D5BA7u, 0x0099246Cu, kEAXCop_VehicleReport,                 0x1C4u, kSPCH1_EventID_VehicleReport };
+    constexpr SpeechEvent kAnytimeEvents_WeatherReport    = { "AnytimeEvents_WeatherReport",    0x00901EA4u, 0x7F435BA7u, 0x0099236Cu, kEAXCop_WeatherReport,                 0x05u,  kSPCH1_EventID_WeatherReport };
 
     struct AttribArray {
         uint16_t mAlloc;
@@ -470,12 +457,8 @@ namespace {
 
 }
 
-Timer&                                   WorldTimer = Game::Global<Timer>(kWorldTimer);
-AIVehicleHelicopter*&                    gHeliVehicle = Game::Global<AIVehicleHelicopter*>(kgHeliVehicle);
-int&                                     SFXCTL_Pathfinder::m_curinteractive = Game::Global<int>(kSFXCTL_Pathfinder_m_curinteractive);
-Speech::Module* (&Speech::Manager::m_SpeechModule)[2] = Game::Global<Speech::Module* [2]>(kManager_m_SpeechModule);
-Speech::EventHistory&                    Speech::Manager::mGlobalHistory = Game::Global<Speech::EventHistory>(kManager_mGlobalHistory);
-Speech::SchedSpchEvents (&Speech::Manager::mEvents)[4] = Game::Global<Speech::SchedSpchEvents[4]>(kManager_mEvents);
+int&                  SFXCTL_Pathfinder::m_curinteractive = Game::Global<int>(kSFXCTL_Pathfinder_m_curinteractive);
+Speech::EventHistory& Speech::Manager::mGlobalHistory = Game::Global<Speech::EventHistory>(kManager_mGlobalHistory);
 
 static_assert(offsetof(EAXCharacter, mSpeakerID) == 0x0C, "EAXCharacter::mSpeakerID");
 static_assert(offsetof(EAXCharacter, mCallsign) == 0x14, "EAXCharacter::mCallsign");
@@ -491,13 +474,11 @@ static_assert(offsetof(SoundAI, mPlayerHeat) == 0x104, "SoundAI::mPlayerHeat");
 static_assert(offsetof(SoundAI, mPlayerSpeed) == 0x108, "SoundAI::mPlayerSpeed");
 static_assert(offsetof(SoundAI, mPursuitDuration) == 0x140, "SoundAI::mPursuitDuration");
 static_assert(offsetof(SoundAI, mPursuitState) == 0x1D4, "SoundAI::mPursuitState");
-static_assert(sizeof(Speech::copPair) == 0x08, "Speech::copPair is 0x8 bytes");
 static_assert(sizeof(Speech::copMap) == 0x10, "Speech::copMap is 0x10 bytes");
 static_assert(sizeof(Speech::ScheduledSpeechEvent) == 0x40, "Speech::ScheduledSpeechEvent is 0x40 bytes");
+static_assert(offsetof(Speech::ScheduledSpeechEvent, ID) == 0x08, "Speech::ScheduledSpeechEvent::ID");
 static_assert(offsetof(Speech::ScheduledSpeechEvent, actor) == 0x0C, "Speech::ScheduledSpeechEvent::actor");
 static_assert(offsetof(Speech::ScheduledSpeechEvent, priority) == 0x3B, "Speech::ScheduledSpeechEvent::priority");
-static_assert(sizeof(Speech::SchedSpchEvents) == 0x14, "Speech::SchedSpchEvents is 0x14 bytes");
-static_assert(offsetof(Speech::GameSpeech, m_currEvent) == 0x88, "Speech::GameSpeech::m_currEvent");
 static_assert(offsetof(MReqBackup, fBackupType) == 0x10, "MReqBackup::fBackupType");
 static_assert(offsetof(Rain, intensity) == 0x28C, "Rain::intensity");
 static_assert(sizeof(Attrib::Instance) == 0x14, "Attrib::Instance is 0x14 bytes");
@@ -538,20 +519,40 @@ bool Speech::Manager::IsCopSpeechBusy() {
     return Game::Call<bool>(kManager_IsCopSpeechBusy);
 }
 
+bool Speech::Manager::IsQueued(SPCHType_1_EventID evtID, int indices) {
+    return Game::Call<bool>(kManager_IsQueued, evtID, indices);
+}
+
+bool Speech::Manager::IsCopSpeechPlaying(SPCHType_1_EventID event_id) {
+    return Game::Call<bool>(kManager_IsCopSpeechPlaying, event_id);
+}
+
 SoundAI* SoundAI::Get() {
     return Game::Global<SoundAI*>(kSingleton_SoundAI_mInstance);
+}
+
+EAXCop* SoundAI::GetRandomActiveCop(int type, bool reqLOS) {
+    return Game::ThisCall<EAXCop*>(kSoundAI_GetRandomActiveCop, this, type, reqLOS);
+}
+
+void SoundAI::UpdateStateMachines() {
+    Game::ThisCall<void>(kSoundAI_UpdateStateMachines, this);
 }
 
 EAXCop* SoundAI::FindClosestCop(bool enforceLOS, bool includeHeli) {
     return Game::ThisCall<EAXCop*>(kSoundAI_FindClosestCop, this, enforceLOS, includeHeli);
 }
 
+void SoundAI::AddNewHeli(IVehicle* heli) {
+    Game::ThisCall<void>(kSoundAI_AddNewHeli, this, heli);
+}
+
 int MiscSpeech::LostSuspect(int spkrID) {
     return Game::Call<int>(kMiscSpeech_LostSuspect, spkrID);
 }
 
-void EAXCop::Update() {
-    Game::ThisCall<void>(kEAXCop_Update, this);
+void EAXCharacter::SetHandle(HSIMABLE handle) {
+    Game::ThisCall<void>(kEAXCharacter_SetHandle, this, handle);
 }
 
 void EAXCop::StrategyReset(bool new_strategy) {
@@ -582,8 +583,8 @@ void EAXDispatch::BackupReply(EAXCop* cop, int yes, int type) {
     Game::ThisCall<void>(kEAXDispatch_BackupReply, this, cop, yes, type);
 }
 
-void EAXDispatch::BackupETA() {
-    Game::ThisCall<void>(kEAXDispatch_BackupETA, this);
+void EAXDispatch::PursuitUpdate(EAXCop* cop) {
+    Game::ThisCall<void>(kEAXDispatch_PursuitUpdate, this, cop);
 }
 
 void EAXAirSupport::Update() {
@@ -608,173 +609,84 @@ Csis::Type_heli_bailout_type EAXAirSupport::GetCauseOfBailout() {
 
 namespace {
 
-    enum class LineState { Waiting, Heard, Dropped };
-    enum class CheckInStep { Idle, Waiting, Speaking };
-    enum class AirSupportStep { Ready, Request, Asking, Reply, Answering };
-    enum class RoadblockStep { Ready, Calling, Update, Updating };
-    enum class BackupStep { Idle, Called, Dispatch, Pilot };
-    enum class SpotLine { Ours, RegainVisual, Spotted };
-
-    struct RadioLine {
-        Speech::ScheduledSpeechEvent* event;
-        unsigned int                  queued;
-        bool                          heard;
-    };
-
     class SpeechRule {
       public:
         enum Kind { kDepFollow, kFlag, kExpiry, kCullingRange };
 
-        void Relax(unsigned int now, unsigned int duration = kRuleRelaxTime);
+        void Relax();
         void Restore();
 
-        uint32_t     collection;
-        Kind         kind;
-        uint32_t     attribute;
-        uint8_t*     value;
-        uint32_t     saved;
-        bool         relaxed;
-        unsigned int until;
+        SPCHType_1_EventID line;
+        uint32_t           collection;
+        Kind               kind;
+        uint32_t           attribute;
+        uint8_t*           value;
+        uint32_t           saved;
+        bool               relaxed;
     };
 
-    uintptr_t gScheduleSpeechPartIIOriginal = kManager_ScheduleSpeechPartII;
-    uintptr_t gMessageReqBackupOriginal     = kStrategyFlow_MessageReqBackup;
-    uintptr_t gTakeCheckOriginal            = kTakeCheck;
+    uintptr_t gNotifyEventCompletionOriginal = kManager_NotifyEventCompletion;
+    uintptr_t gMessageReqBackupOriginal      = kStrategyFlow_MessageReqBackup;
+    uintptr_t gTakeCheckOriginal             = kTakeCheck;
+    uintptr_t gOnCollisionReturn             = 0;
 
-    bool gBailoutCauseOn = false;
-    bool gCheckInOn = false;
-    bool gAirSupportOn = false;
-    bool gRoadblockOn = false;
-    bool gDriverHistoryOn = false;
-    bool gBackupReplyOn = false;
-    bool gSwarmingOn = false;
+    bool gBailoutCauseOn       = false;
+    bool gCheckInOn            = false;
+    bool gAirSupportOn         = false;
+    bool gRoadblockOn          = false;
+    bool gDriverHistoryOn      = false;
+    bool gBackupReplyOn        = false;
+    bool gSwarmingOn           = false;
     bool gPursuitUpdateReplyOn = false;
-    bool gThemeBroadcastOn = false;
-    bool gVehicleReportOn = false;
-    bool gWeatherReportOn = false;
+    bool gThemeBroadcastOn     = false;
+    bool gVehicleReportOn      = false;
+    bool gWeatherReportOn      = false;
 
-    bool                          gOwnLine = false;
-    Speech::ScheduledSpeechEvent* gOwnScheduled = nullptr;
-    bool                          gRadioHeld = false;
-    unsigned int                  gRadioHeldUntil = 0;
-    unsigned int                  gLastPursuitTick = 0;
+    unsigned int         gFlags                  = 0;
+    EAXAirSupport*       gHeliInChase            = nullptr;
+    int                  gHelisThisPursuit       = 0;
+    bool                 gUnusedRegainVisualNext = true;
+    int                  gPursuitTheme           = 0;
+    unsigned             gRoadblockUpdate        = 0;
+    Csis::Type_intensity gIntentToRamIntensity   = Csis::Type_intensity_High;
+    Csis::Type_intensity gLostSuspectIntensity   = Csis::Type_intensity_High;
+    bool                 gNewStrategy            = true;
 
-    SpeechRule gBackup_CallForBU_DepFollow             = { kBackup_CallForBUSpeech, SpeechRule::kDepFollow, kDepFollow };
-    SpeechRule gBackup_DispBackupReply_DepFollow       = { kBackup_DispBackupReplySpeech, SpeechRule::kDepFollow, kDepFollow };
-    SpeechRule gAnytimeEvents_Unit911Reply_DepFollow   = { kAnytimeEvents_Unit911ReplySpeech, SpeechRule::kDepFollow, kDepFollow };
-    SpeechRule gAnytimeEvents_RegainVisual_DepFollow   = { kAnytimeEvents_RegainVisualSpeech, SpeechRule::kDepFollow, kDepFollow };
-    SpeechRule gAnytimeEvents_RegainVisual_expiry      = { kAnytimeEvents_RegainVisualSpeech, SpeechRule::kExpiry };
-    SpeechRule gStaticRoadblock_CallForRB_DepFollow    = { kStaticRoadblock_CallForRBSpeech, SpeechRule::kDepFollow, kDepFollow };
-    SpeechRule gStaticRoadblock_CallForRB_reqLOS       = { kStaticRoadblock_CallForRBSpeech, SpeechRule::kFlag, kreqLOS };
-    SpeechRule gStaticRoadblock_CallForRB_OnScreenOnly = { kStaticRoadblock_CallForRBSpeech, SpeechRule::kFlag, kOnScreenOnly };
-    SpeechRule gStaticRoadblock_CallForRB_expiry       = { kStaticRoadblock_CallForRBSpeech, SpeechRule::kExpiry };
-    SpeechRule gHeliSpecific_HeliBailout_expiry        = { kHeliSpecific_HeliBailoutSpeech, SpeechRule::kExpiry };
-    SpeechRule gHeliSpecific_HeliBailout_CullingRange  = { kHeliSpecific_HeliBailoutSpeech, SpeechRule::kCullingRange };
+    SpeechRule gBackup_CallForBU_DepFollow             = { kSPCH1_EventID_CallForBU, kBackup_CallForBUKey, SpeechRule::kDepFollow, kDepFollowKey };
+    SpeechRule gAnytimeEvents_Unit911Reply_DepFollow   = { kSPCH1_EventID_Unit911Reply, kAnytimeEvents_Unit911ReplyKey, SpeechRule::kDepFollow, kDepFollowKey };
+    SpeechRule gAnytimeEvents_RegainVisual_DepFollow   = { kSPCH1_EventID_RegainVisual, kAnytimeEvents_RegainVisualKey, SpeechRule::kDepFollow, kDepFollowKey };
+    SpeechRule gAnytimeEvents_RegainVisual_expiry      = { kSPCH1_EventID_RegainVisual, kAnytimeEvents_RegainVisualKey, SpeechRule::kExpiry };
+    SpeechRule gStaticRoadblock_CallForRB_DepFollow    = { kSPCH1_EventID_CallForRB, kStaticRoadblock_CallForRBKey, SpeechRule::kDepFollow, kDepFollowKey };
+    SpeechRule gStaticRoadblock_CallForRB_reqLOS       = { kSPCH1_EventID_CallForRB, kStaticRoadblock_CallForRBKey, SpeechRule::kFlag, kReqLOSKey };
+    SpeechRule gStaticRoadblock_CallForRB_OnScreenOnly = { kSPCH1_EventID_CallForRB, kStaticRoadblock_CallForRBKey, SpeechRule::kFlag, kOnScreenOnlyKey };
+    SpeechRule gStaticRoadblock_CallForRB_expiry       = { kSPCH1_EventID_CallForRB, kStaticRoadblock_CallForRBKey, SpeechRule::kExpiry };
+    SpeechRule gHeliSpecific_HeliBailout_expiry        = { kSPCH1_EventID_HeliBailout, kHeliSpecific_HeliBailoutKey, SpeechRule::kExpiry };
+    SpeechRule gHeliSpecific_HeliBailout_CullingRange  = { kSPCH1_EventID_HeliBailout, kHeliSpecific_HeliBailoutKey, SpeechRule::kCullingRange };
     SpeechRule* const gRules[] = {
-        &gBackup_CallForBU_DepFollow,          &gBackup_DispBackupReply_DepFollow,     &gAnytimeEvents_Unit911Reply_DepFollow,
-        &gAnytimeEvents_RegainVisual_DepFollow, &gAnytimeEvents_RegainVisual_expiry,    &gStaticRoadblock_CallForRB_DepFollow,
-        &gStaticRoadblock_CallForRB_reqLOS,    &gStaticRoadblock_CallForRB_OnScreenOnly, &gStaticRoadblock_CallForRB_expiry,
-        &gHeliSpecific_HeliBailout_expiry,     &gHeliSpecific_HeliBailout_CullingRange,
+        &gBackup_CallForBU_DepFollow,
+        &gAnytimeEvents_Unit911Reply_DepFollow,
+        &gAnytimeEvents_RegainVisual_DepFollow,
+        &gAnytimeEvents_RegainVisual_expiry,
+        &gStaticRoadblock_CallForRB_DepFollow,
+        &gStaticRoadblock_CallForRB_reqLOS,
+        &gStaticRoadblock_CallForRB_OnScreenOnly,
+        &gStaticRoadblock_CallForRB_expiry,
+        &gHeliSpecific_HeliBailout_expiry,
+        &gHeliSpecific_HeliBailout_CullingRange,
     };
 
-    uint8_t*     gHiddenTags[kMostHiddenTakes] = {};
-    uint8_t      gHiddenValues[kMostHiddenTakes] = {};
-    unsigned     gHiddenCount = 0;
-    unsigned int gHiddenAt = 0;
-
-    bool                 gHeliOut = false;
-    AIVehicleHelicopter* gHeliSeen = nullptr;
-    bool                 gHeliAlive = false;
-    bool                 gHeliDown = false;
-    int                  gHelisThisPursuit = 0;
-    unsigned int         gHeliJoinedAt = 0;
-
-    Csis::Type_intensity gIntentToRamIntensity = Csis::Type_intensity_High;
-    Csis::Type_intensity gLostSuspectIntensity = Csis::Type_intensity_High;
-    bool                 gNewStrategy = true;
-
-    uintptr_t                    gOnCollisionReturn = 0;
-    bool                         gBailoutPending = false;
-    unsigned int                 gBailoutAt = 0;
-    EAXAirSupport*               gBailoutHeli = nullptr;
-    Csis::Type_heli_bailout_type gBailoutCause = Csis::Type_heli_bailout_type_flight_conditions;
-    float                        gBailoutFuel = 0.0f;
-    bool                         gBailoutFuelKnown = false;
-    RadioLine                    gGoingDownLine = {};
-    bool                         gTunnelAlertPending = false;
-    unsigned int                 gTunnelAlertAt = 0;
-
-    bool         gSpotOursNext = true;
-    bool         gSpotPending = false;
-    bool         gSpotInterrupt = false;
-    unsigned int gSpotAt = 0;
-    SpotLine     gSpotGameLine = SpotLine::Ours;
-    bool         gSpotSaid = false;
-    unsigned int gSpotSaidAt = 0;
-    RadioLine    gSpotLine = {};
-
-    CheckInStep  gCheckInStep = CheckInStep::Idle;
-    unsigned int gCheckInStarted = 0;
-    unsigned int gCheckInNext = 0;
-    RadioLine    gCheckInLine = {};
-
-    AirSupportStep gAirSupportStep = AirSupportStep::Ready;
-    bool           gAirSupportWanted = false;
-    bool           gAirSupportAsked = false;
-    int            gAirSupportFailures = 0;
-    EAXCop*        gAirSupportCaller = nullptr;
-    unsigned int   gAirSupportStarted = 0;
-    unsigned int   gAirSupportNext = 0;
-    int            gAirSupportTries = 0;
-    RadioLine      gAirSupportLine = {};
-
-    bool          gRoadblockRequested = false;
-    unsigned int  gRoadblockRequestedAt = 0;
-    bool          gRoadblockAsked = false;
-    RoadblockStep gRoadblockStep = RoadblockStep::Ready;
-    unsigned int  gRoadblockStarted = 0;
-    unsigned int  gRoadblockNext = 0;
-    int           gRoadblockTries = 0;
-    unsigned      gRoadblockUpdate = 0;
-    RadioLine     gRoadblockLine = {};
-
-    bool         gHistoryAsked = false;
-    bool         gHistoryHeard = false;
-    unsigned int gHistoryAskedAt = 0;
-    bool         gHistoryTracked = false;
-    RadioLine    gHistoryLine = {};
-
-    BackupStep   gBackupStep = BackupStep::Idle;
-    unsigned int gBackupHeardAt = 0;
-    bool         gBackupAnswered = false;
-    bool         gBackupReplying = false;
-    RadioLine    gBackupReplyLine = {};
-
-    bool         gHeliAsked = false;
-    RadioLine    gHeliQuestion = {};
-    bool         gUpdateReplyTracked = false;
-    RadioLine    gUpdateReplyLine = {};
-    bool         gDrivingLineSaid = false;
-    unsigned int gDrivingLineAt = 0;
-
-    bool         gThemeKnown = false;
-    int          gPursuitTheme = 0;
-    bool         gBroadcastTracked = false;
-    RadioLine    gBroadcastLine = {};
-    bool         gVehicleReportDue = false;
-    unsigned int gVehicleReportAt = 0;
-    RadioLine    gVehicleLine = {};
-
-    bool      gRainReported = false;
-    RadioLine gWeatherLine = {};
+    uint8_t*           gHiddenTags[kMostHiddenTakes]   = {};
+    uint8_t            gHiddenValues[kMostHiddenTakes] = {};
+    unsigned           gHiddenCount                    = 0;
+    SPCHType_1_EventID gHiddenForLine                  = kSPCH1_EventID_DriverHistory;
 
     bool SpeechEvent::Verify() const {
-        uint32_t interfaceId[2] = {};
+        uint32_t gameInterfaceId[2] = {};
         char text[64] = "";
         const size_t length = std::strlen(name) + 1;
-        if (length > sizeof(text) || !Memory::Read(iid, interfaceId, sizeof(interfaceId)) || interfaceId[1] != crcs
-            || !Memory::Read(interfaceId[0], text, length) || std::memcmp(text, name, length) != 0) {
-            LOG("%s is off: speed.exe has no Csis::%sId at 0x%08lX.", name, name, static_cast<unsigned long>(iid));
+        if (length > sizeof(text) || !Memory::Read(interfaceId, gameInterfaceId, sizeof(gameInterfaceId)) || gameInterfaceId[1] != interfaceCrcs
+            || !Memory::Read(gameInterfaceId[0], text, length) || std::memcmp(text, name, length) != 0) {
+            LOG("%s is off: speed.exe has no Csis::%sId at 0x%08lX.", name, name, static_cast<unsigned long>(interfaceId));
             return false;
         }
 
@@ -782,11 +694,11 @@ namespace {
         uint8_t code[24] = {};
         uint8_t pushHandle[5] = { kPush };
         uint8_t pushId[5] = { kPush };
-        const uint32_t handleAddress = static_cast<uint32_t>(fh);
-        const uint32_t idAddress = static_cast<uint32_t>(iid);
+        const uint32_t handleAddress = static_cast<uint32_t>(functionHandle);
+        const uint32_t idAddress = static_cast<uint32_t>(interfaceId);
         std::memcpy(pushHandle + 1, &handleAddress, sizeof(handleAddress));
         std::memcpy(pushId + 1, &idAddress, sizeof(idAddress));
-        const bool found = Memory::Read(function + pushes, code, sizeof(code)) && std::memcmp(code, pushHandle, sizeof(pushHandle)) == 0;
+        const bool found = Memory::Read(function + pushOffset, code, sizeof(code)) && std::memcmp(code, pushHandle, sizeof(pushHandle)) == 0;
         bool pushed = false;
         for (size_t i = sizeof(pushHandle); found && !pushed && i + sizeof(pushId) <= sizeof(code); ++i)
             pushed = std::memcmp(code + i, pushId, sizeof(pushId)) == 0;
@@ -804,10 +716,6 @@ namespace {
         return false;
     }
 
-    unsigned int Now() {
-        return static_cast<unsigned int>(WorldTimer.PackedTime);
-    }
-
     template <typename T> Speech::ScheduledSpeechEvent* ScheduleSpeech(T& data, const SpeechEvent& event, EAXCharacter* actor) {
         return Speech::Manager::ScheduleSpeechPartII(sizeof(T), &data, event.Id(), event.Handle(), actor);
     }
@@ -816,56 +724,8 @@ namespace {
         if (Speech::History* history = Speech::Manager::GetHistory().Find(event.id)) history->count = 0;
     }
 
-    Speech::ScheduledSpeechEvent* GetCurrentEvent() {
-        auto* copSpeech = static_cast<Speech::GameSpeech*>(Speech::Manager::m_SpeechModule[kCopSpeechModule]);
-        return copSpeech != nullptr ? copSpeech->GetCurrentEvent() : nullptr;
-    }
-
-    bool IsScheduled(const Speech::ScheduledSpeechEvent* event) {
-        for (int i = 0; i < kEventQueues; ++i) {
-            const Speech::SchedSpchEvents& queue = Speech::Manager::mEvents[i];
-            if (queue.mEnd < queue.mBegin || static_cast<unsigned>(queue.mEnd - queue.mBegin) > kMostQueuedEvents) continue;
-            for (Speech::ScheduledSpeechEvent** scheduled = queue.mBegin; scheduled < queue.mEnd; ++scheduled)
-                if (*scheduled == event) return true;
-        }
-        return false;
-    }
-
-    bool Listen(RadioLine& line, Speech::ScheduledSpeechEvent* event, unsigned int now) {
-        if (!event) return false;
-        if (event->priority < kLinePriority) event->priority = kLinePriority;
-        line = { event, now, false };
-        return true;
-    }
-
-    LineState Track(RadioLine& line, unsigned int now) {
-        if (GetCurrentEvent() == line.event) {
-            line.heard = true;
-            return LineState::Waiting;
-        }
-        if (line.heard) return LineState::Heard;
-        return IsScheduled(line.event) && now - line.queued < kLineTimeout ? LineState::Waiting : LineState::Dropped;
-    }
-
-    template <typename Speak> Speech::ScheduledSpeechEvent* OwnLine(Speak speak) {
-        gOwnLine = true;
-        gOwnScheduled = nullptr;
-        Speech::ScheduledSpeechEvent* scheduled = speak();
-        gOwnLine = false;
-        return gOwnScheduled != nullptr ? gOwnScheduled : scheduled;
-    }
-
-    void HoldRadio(unsigned int now) {
-        gRadioHeld = true;
-        gRadioHeldUntil = now + kRadioHoldTimeout;
-    }
-
-    void ReleaseRadio() {
-        gRadioHeld = false;
-    }
-
-    bool IsRadioHeld(unsigned int now) {
-        return gRadioHeld && now < gRadioHeldUntil && gRadioHeldUntil - now <= kRadioHoldTimeout;
+    bool IsQueuedOrPlaying(SPCHType_1_EventID id) {
+        return Speech::Manager::IsQueued(id, kAllEventQueues) || Speech::Manager::IsCopSpeechPlaying(id);
     }
 
     uint8_t* FindLayoutValue(const Attrib::Collection* collection, size_t field, float longest) {
@@ -878,7 +738,7 @@ namespace {
     }
 
     uint8_t* FindRuleValue(const SpeechRule& rule) {
-        const Attrib::Collection* collection = Attrib::FindCollection(kspeech, rule.collection);
+        const Attrib::Collection* collection = Attrib::FindCollection(kSpeechClassKey, rule.collection);
         if (!collection) return nullptr;
         if (rule.kind == SpeechRule::kExpiry) return FindLayoutValue(collection, offsetof(speech_LayoutStruct, expiry), kLongestExpiry);
         if (rule.kind == SpeechRule::kCullingRange) return FindLayoutValue(collection, offsetof(speech_LayoutStruct, CullingRange), kLongestCullingRange);
@@ -896,16 +756,13 @@ namespace {
         uint32_t eventClass = 0;
         if (!Memory::Read(reinterpret_cast<uintptr_t>(array), &header, sizeof(header))
             || !Memory::Read(reinterpret_cast<uintptr_t>(first), &eventClass, sizeof(eventClass)) || !header.mCount
-            || header.mCount > kMostDepFollows || header.mSize != kDepFollowSize || (header.mFlags & kWideArrayHeader) || eventClass != kspeech)
+            || header.mCount > kMostDepFollows || header.mSize != kDepFollowSize || (header.mFlags & kWideArrayHeader) || eventClass != kSpeechClassKey)
             return nullptr;
         return reinterpret_cast<uint8_t*>(&array->mCount);
     }
 
-    void SpeechRule::Relax(unsigned int now, unsigned int duration) {
-        if (relaxed) {
-            until = now + duration;
-            return;
-        }
+    void SpeechRule::Relax() {
+        if (relaxed) return;
         if (!value) value = FindRuleValue(*this);
         if (!value) return;
         switch (kind) {
@@ -930,7 +787,6 @@ namespace {
         }
         }
         relaxed = true;
-        until = now + duration;
     }
 
     void SpeechRule::Restore() {
@@ -942,9 +798,9 @@ namespace {
         relaxed = false;
     }
 
-    void RestoreExpiredRules(unsigned int now) {
+    void RestoreRulesOfFinishedLines() {
         for (SpeechRule* rule : gRules)
-            if (rule->relaxed && (now >= rule->until || rule->until - now > kRuleRelaxTime)) rule->Restore();
+            if (rule->relaxed && !IsQueuedOrPlaying(rule->line)) rule->Restore();
     }
 
     void RestoreAllRules() {
@@ -984,7 +840,7 @@ namespace {
         }
     }
 
-    bool HideTakes(uint16_t sample, uint16_t speaker, unsigned first, unsigned count, uint8_t expected, unsigned int now) {
+    bool HideTakes(SPCHType_1_EventID line, uint16_t sample, uint16_t speaker, unsigned first, unsigned count, uint8_t expected) {
         if (gHiddenCount || count > kMostHiddenTakes) return false;
         for (unsigned take = first; take < first + count; ++take) {
             uint8_t* tag = FindTakeTag(sample, speaker, take, expected);
@@ -997,12 +853,12 @@ namespace {
             ++gHiddenCount;
             *tag = kUnusedTag;
         }
-        gHiddenAt = now;
+        gHiddenForLine = line;
         return true;
     }
 
-    void ExpireHiddenTakes(unsigned int now) {
-        if (gHiddenCount && (now < gHiddenAt || now - gHiddenAt > kHiddenTakeTimeout)) ShowHiddenTakes();
+    void ShowHiddenTakesOfFinishedLine() {
+        if (gHiddenCount && !IsQueuedOrPlaying(gHiddenForLine)) ShowHiddenTakes();
     }
 
     bool ReadSampleId(const void* header, SampleId& id) {
@@ -1099,14 +955,9 @@ namespace {
         }
         LOG("Speech: ENTRY_%05lu (0x%04X)", static_cast<unsigned long>(found->entries[static_cast<size_t>(take)]), id.sample);
     }
-
-    const char* LineName(AirSupportStep step) {
-        return step == AirSupportStep::Asking || step == AirSupportStep::Request ? "unit's request" : "dispatch reply";
-    }
 #else
     void LoadSpeechEntries() {}
     void LogTake(const void*, int) {}
-    const char* LineName(AirSupportStep step);
 #endif
 
     Csis::Type_intensity NextIntensity(Csis::Type_intensity& last) {
@@ -1114,15 +965,9 @@ namespace {
         return last;
     }
 
-    bool IsAirSupport(const EAXCharacter* character) {
-        uintptr_t vtable = 0;
-        return character && Memory::Read(reinterpret_cast<uintptr_t>(character), &vtable, sizeof(vtable)) && vtable == kEAXAirSupportVTable;
-    }
-
     EAXAirSupport* ActiveHeli() {
         SoundAI* ai = SoundAI::Get();
-        EAXAirSupport* heli = ai != nullptr ? ai->GetHeli() : nullptr;
-        return gHeliVehicle != nullptr && IsAirSupport(heli) ? heli : nullptr;
+        return ai != nullptr ? ai->GetHeli() : nullptr;
     }
 
     EAXDispatch* Dispatch() {
@@ -1140,454 +985,134 @@ namespace {
         return ai != nullptr ? ai->GetPlayerSpeed() : 0.0f;
     }
 
-    float PursuitDuration() {
-        SoundAI* ai = SoundAI::Get();
-        return ai != nullptr ? ai->GetPursuitDuration() : -1.0f;
-    }
-
-    bool IsSearching() {
-        SoundAI* ai = SoundAI::Get();
-        return ai != nullptr && ai->GetPursuitState() == SoundAI::kSearching;
-    }
-
     float RainIntensity() {
         Rain* rain = Game::Global<Rain*>(kPlayerViewPrecipitation);
         return rain != nullptr ? rain->GetRainIntensity() : 0.0f;
     }
 
-    template <typename Visit> void ForEachCop(Visit visit) {
-        SoundAI* ai = SoundAI::Get();
-        if (!ai) return;
-        const Speech::copMap& actors = ai->GetActors();
-        if (actors.end() < actors.begin() || static_cast<unsigned>(actors.end() - actors.begin()) > kMostActors) return;
-        for (const Speech::copPair* actor = actors.begin(); actor < actors.end(); ++actor)
-            if (actor->cop) visit(actor->cop);
+    void RelaxCallForRBRules() {
+        gStaticRoadblock_CallForRB_DepFollow.Relax();
+        gStaticRoadblock_CallForRB_reqLOS.Relax();
+        gStaticRoadblock_CallForRB_OnScreenOnly.Relax();
+        gStaticRoadblock_CallForRB_expiry.Relax();
     }
 
-    bool IsInChase(const EAXCop* unit) {
-        bool found = false;
-        ForEachCop([&](EAXCop* cop) { found = found || cop == unit; });
-        return unit && found;
+    void RelaxHeliBailoutRules() {
+        gHeliSpecific_HeliBailout_expiry.Relax();
+        gHeliSpecific_HeliBailout_CullingRange.Relax();
     }
 
-    bool CanCallForAirSupport(EAXCop* cop) {
-        const int speaker = cop->GetSpeakerID();
-        for (int caller : kAirSupportCallers)
-            if (speaker == caller) return cop->IsActive() && cop->HasLOS();
-        return false;
+    void CheckIn(EAXAirSupport* heli) {
+        if (!gCheckInOn) return;
+        ResetPlayCount(kAnytimeEvents_Unit911Reply);
+        gAnytimeEvents_Unit911Reply_DepFollow.Relax();
+        heli->EAXCop::Reply911();
+        LOG("Check-in: the pilot checks in (%s).", IsQueuedOrPlaying(kSPCH1_EventID_Unit911Reply) ? "queued" : "turned down by the game");
     }
 
-    EAXCop* PickAirSupportCaller() {
-        EAXCop* callers[kMostCallers] = {};
-        unsigned count = 0;
-        ForEachCop([&](EAXCop* cop) {
-            if (count < kMostCallers && CanCallForAirSupport(cop)) callers[count++] = cop;
-        });
-        return count ? callers[static_cast<unsigned>(std::rand()) % count] : nullptr;
-    }
-
-    void RelaxCallForRBRules(unsigned int now) {
-        gStaticRoadblock_CallForRB_DepFollow.Relax(now);
-        gStaticRoadblock_CallForRB_reqLOS.Relax(now);
-        gStaticRoadblock_CallForRB_OnScreenOnly.Relax(now);
-        gStaticRoadblock_CallForRB_expiry.Relax(now);
-    }
-
-    void RestoreCallForRBRules() {
-        gStaticRoadblock_CallForRB_DepFollow.Restore();
-        gStaticRoadblock_CallForRB_reqLOS.Restore();
-        gStaticRoadblock_CallForRB_OnScreenOnly.Restore();
-        gStaticRoadblock_CallForRB_expiry.Restore();
-    }
-
-    void FinishRoadblock() {
-        gRoadblockStep = RoadblockStep::Ready;
-        ReleaseRadio();
-        RestoreCallForRBRules();
-    }
-
-    bool HeliMayCallRoadblock(unsigned int now) {
-        return gRoadblockOn && !gRoadblockAsked && gHeliOut && now >= gHeliJoinedAt && now - gHeliJoinedAt >= kRoadblockWait;
-    }
-
-    bool RadioFreeForRoadblock() {
-        return gAirSupportStep == AirSupportStep::Ready && gRoadblockStep == RoadblockStep::Ready && gCheckInStep == CheckInStep::Idle;
-    }
-
-    Speech::ScheduledSpeechEvent* PilotCallsForRB(EAXAirSupport* heli, unsigned int now) {
-        RelaxCallForRBRules(now);
-        ResetPlayCount(kStaticRoadblock_CallForRB);
-        Speech::ScheduledSpeechEvent* event = OwnLine([heli]() -> Speech::ScheduledSpeechEvent* {
-            heli->CallForRB();
-            return nullptr;
-        });
-        if (!Listen(gRoadblockLine, event, now)) {
-            RestoreCallForRBRules();
-            return nullptr;
-        }
-        LOG("Roadblock: the pilot's call for a roadblock is queued.");
-        gRoadblockAsked = true;
-        gRoadblockStep = RoadblockStep::Calling;
-        gRoadblockStarted = now;
-        gRoadblockTries = 0;
-        HoldRadio(now);
-        return event;
-    }
-
-    void AnswerRoadblockRequest(EAXAirSupport* heli, unsigned int now) {
-        if (!gRoadblockRequested) return;
-        if (now < gRoadblockRequestedAt || now - gRoadblockRequestedAt > kRoadblockRequestWindow || !HeliMayCallRoadblock(now)) {
-            LOG("Roadblock: the pilot can't take this request (too soon after joining, already asked, or out of time).");
-            gRoadblockRequested = false;
+    void HelicopterArrived(EAXAirSupport* heli) {
+        LOG("Helicopter: a helicopter joined the chase.");
+        if (gFlags & AIR_SUPPORT_REQ) LOG("Air support: a helicopter showed up before anyone asked, so nobody asks.");
+        gHeliInChase = heli;
+        gFlags &= ~(HELI_DOWN | BAILOUT_REQ | NEW_HELI_SPOT | AIR_SUPPORT_REQ | RB_CALLED);
+        if (gHelisThisPursuit++ > 0) {
+            LOG("Helicopter: a new helicopter is in the chase, so its pilot uses the unused takes the first time he spots you.");
+            gFlags |= NEW_HELI_SPOT;
             return;
         }
-        if (!heli->IsActive() || !RadioFreeForRoadblock()) return;
-        gRoadblockRequested = false;
-        if (!PilotCallsForRB(heli, now)) LOG("Roadblock: the game turned the pilot's call down.");
+        CheckIn(heli);
     }
 
-    Speech::ScheduledSpeechEvent* DispatchRBUpdate() {
-        EAXDispatch* dispatch = Dispatch();
-        if (!dispatch) return nullptr;
+    void HelicopterLeft(bool inPursuit) {
+        gHeliInChase = nullptr;
+        if (!inPursuit || !gAirSupportOn) return;
+        LOG("Helicopter: it left the chase, so a unit will ask for another one when it can see you.");
+        gFlags |= AIR_SUPPORT_REQ;
+    }
+
+    void AskForAirSupport(SoundAI* ai) {
+        EAXCop* caller = ai->GetRandomActiveCop(kPrimaryCops, true);
+        EAXDispatch* dispatch = ai->GetDispatch();
+        if (!caller || !dispatch) return;
+        gFlags &= ~AIR_SUPPORT_REQ;
+        LOG("Air support: unit with speaker ID %d can see you and asks for another helicopter.", caller->GetSpeakerID());
+        gBackup_CallForBU_DepFollow.Relax();
+        ResetPlayCount(kBackup_CallForBU);
+        caller->CallForBackup(Csis::Type_disp_backup_type_Air_Support);
+        ResetPlayCount(kBackup_DispBackupReply);
+        dispatch->BackupReply(caller, 1, Csis::Type_disp_backup_type_Air_Support);
+    }
+
+    void PilotCallsForRB(EAXAirSupport* heli, EAXDispatch* dispatch) {
+        RelaxCallForRBRules();
+        ResetPlayCount(kStaticRoadblock_CallForRB);
+        heli->CallForRB();
         gRoadblockUpdate = (gRoadblockUpdate + 1u) % kRoadblockUpdateCount;
         Csis::StaticRoadblock_DispRBUpdateStruct data = { dispatch->GetSpeakerID(), dispatch->GetRandomizedCode(), kRoadblockUpdates[gRoadblockUpdate].yes_no,
                                                           kRoadblockUpdates[gRoadblockUpdate].roadblock_type };
         ResetPlayCount(kStaticRoadblock_DispRBUpdate);
-        return OwnLine([&data, dispatch] { return ScheduleSpeech(data, kStaticRoadblock_DispRBUpdate, dispatch); });
-    }
-
-    void AdvanceRoadblock(unsigned int now) {
-        if (gRoadblockStep == RoadblockStep::Ready) return;
-        if (now < gRoadblockStarted || now - gRoadblockStarted > kRoadblockGiveUp) {
-            LOG("Roadblock: gave up on dispatch's answer.");
-            FinishRoadblock();
-            return;
-        }
-
-        switch (gRoadblockStep) {
-        case RoadblockStep::Calling:
-            switch (Track(gRoadblockLine, now)) {
-            case LineState::Heard:
-                LOG("Roadblock: the pilot's call played.");
-                RestoreCallForRBRules();
-                gRoadblockStep = RoadblockStep::Update;
-                gRoadblockNext = now;
-                break;
-            case LineState::Dropped:
-                LOG("Roadblock: the game dropped the pilot's call before it played; he can take the next request.");
-                FinishRoadblock();
-                gRoadblockAsked = false;
-                break;
-            default:
-                break;
-            }
-            break;
-        case RoadblockStep::Update:
-            if (now < gRoadblockNext) return;
-            if (!Listen(gRoadblockLine, DispatchRBUpdate(), now)) {
-                LOG("Roadblock: the game turned dispatch's answer down, trying again in a second.");
-                gRoadblockNext = now + kRetry;
-                return;
-            }
-            LOG("Roadblock: dispatch's answer is queued.");
-            gRoadblockStep = RoadblockStep::Updating;
-            HoldRadio(now);
-            break;
-        case RoadblockStep::Updating:
-            switch (Track(gRoadblockLine, now)) {
-            case LineState::Heard:
-                LOG("Roadblock: dispatch's answer played.");
-                FinishRoadblock();
-                break;
-            case LineState::Dropped:
-                LOG("Roadblock: the game dropped dispatch's answer before it played.");
-                if (++gRoadblockTries >= kRoadblockTries) {
-                    FinishRoadblock();
-                    break;
-                }
-                gRoadblockStep = RoadblockStep::Update;
-                gRoadblockNext = now + kRetry;
-                break;
-            default:
-                break;
-            }
-            break;
-        default:
-            break;
-        }
-    }
-
-    void StartCheckIn(unsigned int now) {
-        if (!gCheckInOn) return;
-        gCheckInStep = CheckInStep::Waiting;
-        gCheckInStarted = now;
-        gCheckInNext = now;
-    }
-
-    void CheckIn(EAXAirSupport* heli, unsigned int now) {
-        if (gCheckInStep == CheckInStep::Idle) return;
-        if (now < gCheckInStarted || now - gCheckInStarted > kCheckInGiveUp) {
-            LOG("Check-in: gave up.");
-            gAnytimeEvents_Unit911Reply_DepFollow.Restore();
-            gCheckInStep = CheckInStep::Idle;
-            return;
-        }
-
-        if (gCheckInStep == CheckInStep::Waiting) {
-            if (now < gCheckInNext || Speech::Manager::IsCopSpeechBusy() || gAirSupportStep != AirSupportStep::Ready
-                || gRoadblockStep != RoadblockStep::Ready)
-                return;
-            ResetPlayCount(kAnytimeEvents_Unit911Reply);
-            gAnytimeEvents_Unit911Reply_DepFollow.Relax(now);
-            Speech::ScheduledSpeechEvent* event = OwnLine([heli]() -> Speech::ScheduledSpeechEvent* {
-                heli->EAXCop::Reply911();
-                return nullptr;
-            });
-            if (!Listen(gCheckInLine, event, now)) {
-                LOG("Check-in: the game turned the pilot's line down, trying again in a second.");
-                gAnytimeEvents_Unit911Reply_DepFollow.Restore();
-                gCheckInNext = now + kRetry;
-                return;
-            }
-            LOG("Check-in: the pilot's line is queued.");
-            gCheckInStep = CheckInStep::Speaking;
-            return;
-        }
-
-        switch (Track(gCheckInLine, now)) {
-        case LineState::Heard:
-            LOG("Check-in: the pilot's line played.");
-            gAnytimeEvents_Unit911Reply_DepFollow.Restore();
-            gCheckInStep = CheckInStep::Idle;
-            break;
-        case LineState::Dropped:
-            LOG("Check-in: the game dropped the pilot's line before it played.");
-            gAnytimeEvents_Unit911Reply_DepFollow.Restore();
-            gCheckInStep = CheckInStep::Waiting;
-            gCheckInNext = now + kRetry;
-            break;
-        default:
-            break;
-        }
-    }
-
-    void FinishAirSupport(unsigned int now, bool checkIn) {
-        gAirSupportStep = AirSupportStep::Ready;
-        ReleaseRadio();
-        gBackup_CallForBU_DepFollow.Restore();
-        gBackup_DispBackupReply_DepFollow.Restore();
-        if (!gAirSupportAsked && gAirSupportWanted && ++gAirSupportFailures >= kAirSupportTries) {
-            LOG("Air support: nobody managed to ask for another helicopter, so the units stop trying.");
-            gAirSupportWanted = false;
-        }
-        if (checkIn && ActiveHeli()) StartCheckIn(now);
-    }
-
-    bool StartAirSupport(unsigned int now) {
-        if (!gAirSupportOn || gAirSupportStep != AirSupportStep::Ready || gRoadblockStep != RoadblockStep::Ready || PursuitDuration() < 0.0f)
-            return false;
-        LOG("Air support: the last helicopter is gone, so a unit that can see you asks for another one.");
-        gAirSupportStep = AirSupportStep::Request;
-        gAirSupportStarted = now;
-        gAirSupportNext = now;
-        gAirSupportTries = 0;
-        return true;
-    }
-
-    Speech::ScheduledSpeechEvent* UnitCallsForAirSupport() {
-        ResetPlayCount(kBackup_CallForBU);
-        EAXCop* caller = gAirSupportCaller;
-        return OwnLine([caller]() -> Speech::ScheduledSpeechEvent* {
-            caller->CallForBackup(Csis::Type_disp_backup_type_Air_Support);
-            return nullptr;
-        });
-    }
-
-    Speech::ScheduledSpeechEvent* DispatchSendsAirSupport() {
-        EAXDispatch* dispatch = Dispatch();
-        if (!dispatch) return nullptr;
-        ResetPlayCount(kBackup_DispBackupReply);
-        EAXCop* caller = gAirSupportCaller;
-        return OwnLine([dispatch, caller]() -> Speech::ScheduledSpeechEvent* {
-            dispatch->BackupReply(caller, 1, Csis::Type_disp_backup_type_Air_Support);
-            return nullptr;
-        });
-    }
-
-    void SayAirSupportLine(AirSupportStep listening, SpeechRule& rule, Speech::ScheduledSpeechEvent* event, unsigned int now) {
-        if (!Listen(gAirSupportLine, event, now)) {
-            LOG("Air support: the game turned down the %s line, trying again in a second.", LineName(listening));
-            rule.Restore();
-            gAirSupportNext = now + kRetry;
-            return;
-        }
-        LOG("Air support: the %s line is queued.", LineName(listening));
-        gAirSupportStep = listening;
-        HoldRadio(now);
-    }
-
-    void FollowAirSupportLine(AirSupportStep listening, SpeechRule& rule, AirSupportStep retry, unsigned int now) {
-        switch (Track(gAirSupportLine, now)) {
-        case LineState::Heard:
-            LOG("Air support: the %s line played.", LineName(listening));
-            rule.Restore();
-            gAirSupportTries = 0;
-            if (listening == AirSupportStep::Answering) {
-                gAirSupportWanted = false;
-                FinishAirSupport(now, true);
-                return;
-            }
-            gAirSupportAsked = true;
-            gAirSupportWanted = false;
-            gAirSupportStep = AirSupportStep::Reply;
-            gAirSupportStarted = now;
-            gAirSupportNext = now;
-            break;
-        case LineState::Dropped:
-            LOG("Air support: the game dropped the %s line before it played.", LineName(listening));
-            rule.Restore();
-            if (++gAirSupportTries >= kAirSupportTries) {
-                FinishAirSupport(now, true);
-                return;
-            }
-            gAirSupportStep = retry;
-            gAirSupportNext = now + kRetry;
-            break;
-        default:
-            break;
-        }
-    }
-
-    void AdvanceAirSupport(unsigned int now) {
-        if (gAirSupportStep == AirSupportStep::Ready) return;
-        const bool waiting = gAirSupportStep == AirSupportStep::Request || gAirSupportStep == AirSupportStep::Reply;
-        if (waiting && (now < gAirSupportStarted || now - gAirSupportStarted > kAirSupportGiveUp)) {
-            LOG("Air support: the %s line couldn't be queued in time.", LineName(gAirSupportStep));
-            FinishAirSupport(now, true);
-            return;
-        }
-
-        switch (gAirSupportStep) {
-        case AirSupportStep::Request:
-            if (ActiveHeli()) {
-                LOG("Air support: a helicopter is already up, so nobody asks.");
-                FinishAirSupport(now, false);
-                return;
-            }
-            if (now < gAirSupportNext || Speech::Manager::IsCopSpeechBusy()) return;
-            gAirSupportCaller = PickAirSupportCaller();
-            if (!gAirSupportCaller) {
-                gAirSupportNext = now + kRetry;
-                return;
-            }
-            LOG("Air support: unit with speaker ID %d can see you and asks for it.", gAirSupportCaller->GetSpeakerID());
-            gBackup_CallForBU_DepFollow.Relax(now);
-            SayAirSupportLine(AirSupportStep::Asking, gBackup_CallForBU_DepFollow, UnitCallsForAirSupport(), now);
-            break;
-        case AirSupportStep::Asking:
-            FollowAirSupportLine(AirSupportStep::Asking, gBackup_CallForBU_DepFollow, AirSupportStep::Request, now);
-            break;
-        case AirSupportStep::Reply:
-            if (now < gAirSupportNext) return;
-            if (!IsInChase(gAirSupportCaller)) {
-                LOG("Air support: the unit left the chase before dispatch could answer.");
-                FinishAirSupport(now, true);
-                return;
-            }
-            gBackup_DispBackupReply_DepFollow.Relax(now);
-            SayAirSupportLine(AirSupportStep::Answering, gBackup_DispBackupReply_DepFollow, DispatchSendsAirSupport(), now);
-            break;
-        case AirSupportStep::Answering:
-            FollowAirSupportLine(AirSupportStep::Answering, gBackup_DispBackupReply_DepFollow, AirSupportStep::Reply, now);
-            break;
-        default:
-            break;
-        }
+        Speech::ScheduledSpeechEvent* update = ScheduleSpeech(data, kStaticRoadblock_DispRBUpdate, dispatch);
+        LOG("Roadblock: the pilot calls for a roadblock (%s) and dispatch answers (%s).",
+            IsQueuedOrPlaying(kSPCH1_EventID_CallForRB) ? "queued" : "turned down by the game", update ? "queued" : "turned down by the game");
     }
 
     bool GetFuelTimeRemaining(EAXAirSupport* heli, float& seconds) {
-        ISimable* simable = gBailoutCauseOn ? ISimable::FindInstance(heli->GetHandle()) : nullptr;
+        ISimable* simable = ISimable::FindInstance(heli->GetHandle());
         IAIHelicopter* ai = nullptr;
         if (!simable || !simable->QueryInterface(&ai)) return false;
         seconds = ai->GetFuelTimeRemaining();
         return true;
     }
 
-    void ReportDamage(EAXAirSupport* heli, unsigned int now) {
-        if (gRoadblockStep != RoadblockStep::Ready) FinishRoadblock();
-        gHeliSpecific_HeliBailout_expiry.Relax(now);
-        gHeliSpecific_HeliBailout_CullingRange.Relax(now);
+    void SayDamageReport(EAXAirSupport* heli) {
+        RelaxHeliBailoutRules();
         ResetPlayCount(kHeliSpecific_HeliBailout);
         Csis::HeliSpecific_HeliBailoutStruct data = { heli->GetSpeakerID(), Csis::Type_heli_bailout_type_damage_sustained };
-        Speech::ScheduledSpeechEvent* event = OwnLine([&data, heli] { return ScheduleSpeech(data, kHeliSpecific_HeliBailout, heli); });
-        if (!Listen(gGoingDownLine, event, now)) {
-            LOG("Going down: the game turned the pilot's damage report down.");
-            return;
-        }
-        LOG("Going down: the pilot's damage report is queued.");
+        Speech::ScheduledSpeechEvent* event = ScheduleSpeech(data, kHeliSpecific_HeliBailout, heli);
+        LOG("Going down: the pilot's damage report was %s.", event ? "queued" : "turned down by the game");
     }
 
-    void GamesOwnBailout(EAXAirSupport* heli, unsigned int now) {
-        gHeliSpecific_HeliBailout_expiry.Relax(now);
-        gHeliSpecific_HeliBailout_CullingRange.Relax(now);
+    void GamesOwnBailout(EAXAirSupport* heli) {
+        RelaxHeliBailoutRules();
         ResetPlayCount(kHeliSpecific_HeliBailout);
-        Speech::ScheduledSpeechEvent* event = OwnLine([heli]() -> Speech::ScheduledSpeechEvent* {
-            heli->EAXAirSupport::Bailout();
-            return nullptr;
-        });
-        Listen(gGoingDownLine, event, now);
+        heli->EAXAirSupport::Bailout();
     }
 
-    void SearchPattern(unsigned int now) {
+    void SaySearchPattern() {
         ResetPlayCount(kAnytimeEvents_LostSuspect);
         Csis::AnytimeEvents_LostSuspectStruct data = { Speech::Heli, NextIntensity(gLostSuspectIntensity) };
-        Speech::ScheduledSpeechEvent* event = OwnLine([&data] { return ScheduleSpeech(data, kAnytimeEvents_LostSuspect, nullptr); });
-        Listen(gGoingDownLine, event, now);
+        Speech::ScheduledSpeechEvent* event = ScheduleSpeech(data, kAnytimeEvents_LostSuspect, nullptr);
         LOG("Losing you: the pilot's search pattern line was %s.", event ? "queued" : "turned down by the game");
     }
 
-    void ResolveBailout(unsigned int now) {
-        if (!gBailoutPending || (now >= gBailoutAt && now - gBailoutAt < kBailoutSettle)) return;
-        gBailoutPending = false;
-        EAXAirSupport* heli = gBailoutHeli;
-        if (!IsAirSupport(heli)) return;
+    void SayGoingDown(EAXAirSupport* heli) {
         if (heli->IsDead() || heli->GetHealth() < kFullHealth) {
             LOG("Going down: the helicopter was shot down, so the pilot reports damage.");
-            ReportDamage(heli, now);
+            SayDamageReport(heli);
             return;
         }
-        if (gBailoutCause != Csis::Type_heli_bailout_type_fuel_low || !gBailoutFuelKnown || gBailoutFuel <= HELI_FUEL_CRITICAL_TIME) {
-            LOG("Going down: the game's own reason (cause %d, %d s of fuel left).", static_cast<int>(gBailoutCause),
-                gBailoutFuelKnown ? static_cast<int>(gBailoutFuel) : -1);
-            GamesOwnBailout(heli, now);
+        float fuel = 0.0f;
+        const bool fuelKnown = GetFuelTimeRemaining(heli, fuel);
+        const Csis::Type_heli_bailout_type cause = heli->GetCauseOfBailout();
+        if (cause != Csis::Type_heli_bailout_type_fuel_low || !fuelKnown || fuel <= HELI_FUEL_CRITICAL_TIME) {
+            LOG("Going down: the game's own reason (cause %d, %d s of fuel left).", static_cast<int>(cause), fuelKnown ? static_cast<int>(fuel) : -1);
+            GamesOwnBailout(heli);
             return;
         }
-        LOG("Losing you: the helicopter lost sight of you with %d s of fuel left and no damage.", static_cast<int>(gBailoutFuel));
-        SearchPattern(now);
+        LOG("Losing you: the helicopter lost sight of you with %d s of fuel left and no damage.", static_cast<int>(fuel));
+        SaySearchPattern();
     }
 
-    void TunnelAlert(EAXAirSupport* heli, unsigned int now) {
-        if (!gTunnelAlertPending || now < gTunnelAlertAt) return;
-        gTunnelAlertPending = false;
-        if (gHeliDown || heli->IsDead()) return;
-        LOG("Tunnel warning: the pilot warns about the tunnel.");
-        heli->EAXAirSupport::HazardAlert(Csis::Type_heli_hazard_alert_type_approaching_tunnel);
-    }
-
-    void SpotYou(EAXAirSupport* heli, unsigned int now, bool interrupt) {
-        gAnytimeEvents_RegainVisual_DepFollow.Relax(now, kRegainVisualRelax);
-        gAnytimeEvents_RegainVisual_expiry.Relax(now, kRegainVisualRelax);
+    void SayUnusedRegainVisual(EAXAirSupport* heli) {
+        gAnytimeEvents_RegainVisual_DepFollow.Relax();
+        gAnytimeEvents_RegainVisual_expiry.Relax();
         ResetPlayCount(kAnytimeEvents_RegainVisual);
         Csis::AnytimeEvents_RegainVisualStruct data = { heli->GetSpeakerID(), Csis::Type_intensity_Normal };
-        Speech::ScheduledSpeechEvent* event = interrupt ? OwnLine([&data, heli] { return ScheduleSpeech(data, kAnytimeEvents_RegainVisual, heli); })
-                                                        : ScheduleSpeech(data, kAnytimeEvents_RegainVisual, heli);
-        if (Listen(gSpotLine, event, now) && interrupt) event->priority = kInterruptPriority;
-        gSpotSaid = true;
-        gSpotSaidAt = now;
-        LOG("Spotting you: the pilot's line was %s.", !event ? "turned down by the game" : interrupt ? "queued to cut in" : "queued");
+        Speech::ScheduledSpeechEvent* event = ScheduleSpeech(data, kAnytimeEvents_RegainVisual, heli);
+        LOG("Spotting you: the pilot's line was %s.", event ? "queued" : "turned down by the game");
     }
 
-    void SayGameSpot(EAXAirSupport* heli, SpotLine line) {
+    void SayGamesOwnSpot(EAXAirSupport* heli, SpotLine line) {
         if (line == SpotLine::Spotted)
             heli->EAXCop::Spotted();
         else
@@ -1595,447 +1120,163 @@ namespace {
     }
 
     void HeliSpots(EAXAirSupport* heli, SpotLine gameLine) {
-        const unsigned int now = Now();
-        if (gSpotSaid && now >= gSpotSaidAt && now - gSpotSaidAt < kSpotQuiet) {
-            LOG("Spotting you: the pilot just said it, so the game's own call is skipped.");
+        if (gFlags & NEW_HELI_SPOT) {
+            gFlags &= ~NEW_HELI_SPOT;
+            LOG("Spotting you: the new helicopter's pilot says he has you.");
+            SayUnusedRegainVisual(heli);
             return;
         }
-        if (gSpotPending && gSpotInterrupt) {
-            LOG("Spotting you: the pilot's arrival line is still waiting, so the game's own call is skipped.");
-            return;
-        }
-        const bool ours = gSpotOursNext;
-        gSpotOursNext = !gSpotOursNext;
-        if (IsSearching()) {
-            LOG("Spotting you: the search isn't over yet, so the pilot waits until it really is.");
-            gSpotPending = true;
-            gSpotInterrupt = false;
-            gSpotGameLine = ours ? SpotLine::Ours : gameLine;
-            gSpotAt = now;
-            return;
-        }
-        if (!ours) {
+        const bool useUnusedTakes = gUnusedRegainVisualNext;
+        gUnusedRegainVisualNext = !gUnusedRegainVisualNext;
+        if (!useUnusedTakes) {
             LOG("Spotting you: this time the pilot uses the game's own takes.");
-            gSpotSaid = true;
-            gSpotSaidAt = now;
-            SayGameSpot(heli, gameLine);
+            SayGamesOwnSpot(heli, gameLine);
             return;
         }
-        if (!IsRadioHeld(now)) {
-            SpotYou(heli, now, false);
-            return;
-        }
-        LOG("Spotting you: the radio is busy with an exchange, so the pilot waits for it.");
-        gSpotPending = true;
-        gSpotGameLine = SpotLine::Ours;
-        gSpotAt = now;
+        SayUnusedRegainVisual(heli);
     }
 
-    void PendingSpot(EAXAirSupport* heli, unsigned int now) {
-        if (!gSpotPending) return;
-        const bool expired = now < gSpotAt || now - gSpotAt > (gSpotInterrupt ? kSpotWindow : kSpotSearchWindow);
-        if (IsSearching()) {
-            if (gSpotInterrupt)
-                gSpotAt = now;
-            else if (expired) {
-                LOG("Spotting you: the search went on, so the pilot never really spotted you.");
-                gSpotPending = false;
-            }
-            return;
-        }
-        if (!gSpotInterrupt && IsRadioHeld(now)) return;
-        if (!expired) {
-            if (!heli->IsActive()) return;
-            if (gSpotGameLine != SpotLine::Ours) {
-                gSpotSaid = true;
-                gSpotSaidAt = now;
-                SayGameSpot(heli, gSpotGameLine);
-            } else
-                SpotYou(heli, now, gSpotInterrupt);
-        }
-        gSpotPending = false;
-        gSpotInterrupt = false;
-        gSpotGameLine = SpotLine::Ours;
-    }
-
-    void ReadDriverHistory(unsigned int now) {
-        EAXDispatch* dispatch = Dispatch();
-        if (!dispatch) return;
+    void ReadDriverHistory(EAXDispatch* dispatch) {
         unsigned tier = static_cast<unsigned>(std::rand()) % kRecordTiers;
-        if (tier == 0 && !HideTakes(kDriverHistorySample, Speech::Dispatch, 0, kMinorRecordTakes, kMinorRecordTag, now))
+        if (tier == 0 && !HideTakes(kSPCH1_EventID_DriverHistory, kDriverHistorySample, Speech::Dispatch, 0, kMinorRecordTakes, kMinorRecordTag))
             tier = 1u + static_cast<unsigned>(std::rand()) % (kRecordTiers - 1u);
         ResetPlayCount(kAnytimeEvents_DriverHistory);
         Csis::AnytimeEvents_DriverHistoryStruct data = { dispatch->GetSpeakerID(), static_cast<Csis::Type_region>(1u << tier) };
-        Speech::ScheduledSpeechEvent* event = OwnLine([&data, dispatch] { return ScheduleSpeech(data, kAnytimeEvents_DriverHistory, dispatch); });
-        if (!Listen(gHistoryLine, event, now)) {
+        if (!ScheduleSpeech(data, kAnytimeEvents_DriverHistory, dispatch)) {
             LOG("Driver history: the game turned dispatch's line down.");
             ShowHiddenTakes();
             return;
         }
-        gHistoryTracked = true;
         LOG("Driver history: dispatch reads out record tier %u.", tier + 1u);
     }
 
-    void NoteHistoryRequest(int take, unsigned int now) {
-        if (!gDriverHistoryOn || take < kHistoryRequestFirstTake || take > kHistoryRequestLastTake) return;
-        gHistoryAsked = true;
-        gHistoryHeard = false;
-        gHistoryAskedAt = now;
-    }
-
-    void AnswerHistoryRequest(unsigned int now) {
-        if (now < gHistoryAskedAt || now - gHistoryAskedAt > kDriverHistoryWindow) {
-            LOG("Driver history: the pilot's history request never played, so dispatch stays quiet.");
-            gHistoryAsked = false;
-            return;
-        }
-        Speech::ScheduledSpeechEvent* playing = GetCurrentEvent();
-        if (playing != nullptr && playing->iid == &kAnytimeEvents_Unit911Reply.Id()) {
-            gHistoryHeard = true;
-            return;
-        }
-        if (!gHistoryHeard || IsRadioHeld(now)) return;
-        gHistoryAsked = false;
-        gHistoryHeard = false;
+    void AnswerHistoryRequest() {
+        EAXDispatch* dispatch = Dispatch();
+        if (!dispatch) return;
         if (PlayerHeat() < kDriverHistoryMinHeat) {
             LOG("Driver history: the pilot asked for your history below heat %d, so dispatch stays quiet.", kDriverHistoryMinHeat);
             return;
         }
         LOG("Driver history: the pilot asked for your history, so dispatch reads it out.");
-        ReadDriverHistory(now);
+        ReadDriverHistory(dispatch);
     }
 
-    void FollowHistoryLine(unsigned int now) {
-        if (!gHistoryTracked || Track(gHistoryLine, now) == LineState::Waiting) return;
-        gHistoryTracked = false;
-        ShowHiddenTakes();
-    }
-
-    void FinishBackupReply() {
-        if (gBackupReplying && gCheckInStep == CheckInStep::Idle) gAnytimeEvents_Unit911Reply_DepFollow.Restore();
-        gBackupReplying = false;
-        gBackupStep = BackupStep::Idle;
-    }
-
-    void PilotRepliesToBackup(EAXDispatch* dispatch, unsigned int now) {
-        gBackupStep = BackupStep::Idle;
+    void PilotRepliesToBackup() {
         EAXAirSupport* heli = ActiveHeli();
-        const bool up = heli && !gHeliDown;
+        EAXDispatch* dispatch = Dispatch();
+        const bool up = heli && !(gFlags & HELI_DOWN);
         if ((up && !gSwarmingOn) || (!up && (!dispatch || (PlayerHeat() < kHeliMinHeat && gHelisThisPursuit == 0)))) return;
         if (static_cast<unsigned>(std::rand()) % kBackupReplyChance != 0) {
             LOG("Backup reply: the pilot let this call for backup go.");
             return;
         }
-        Speech::ScheduledSpeechEvent* event = nullptr;
         if (up) {
             ResetPlayCount(kHeliSpecific_HeliSwarming);
-            event = OwnLine([heli]() -> Speech::ScheduledSpeechEvent* {
-                heli->EAXAirSupport::Swarming();
-                return nullptr;
-            });
-        } else {
-            ResetPlayCount(kAnytimeEvents_Unit911Reply);
-            gAnytimeEvents_Unit911Reply_DepFollow.Relax(now);
-            gBackupReplying = true;
-            Csis::AnytimeEvents_Unit911ReplyStruct data = { Speech::Heli };
-            event = OwnLine([&data, dispatch] { return ScheduleSpeech(data, kAnytimeEvents_Unit911Reply, dispatch); });
-        }
-        if (!Listen(gBackupReplyLine, event, now)) {
-            LOG("Backup reply: the game turned the pilot's line down.");
-            FinishBackupReply();
-            return;
-        }
-        gBackupStep = BackupStep::Pilot;
-        if (up)
+            heli->EAXAirSupport::Swarming();
             LOG("Backup reply: the pilot tells the unit he can see its cover closing in.");
-        else
-            LOG("Backup reply: no helicopter is up, so the pilot answers on his way in.");
+            return;
+        }
+        ResetPlayCount(kAnytimeEvents_Unit911Reply);
+        gAnytimeEvents_Unit911Reply_DepFollow.Relax();
+        Csis::AnytimeEvents_Unit911ReplyStruct data = { Speech::Heli };
+        if (!ScheduleSpeech(data, kAnytimeEvents_Unit911Reply, dispatch)) {
+            LOG("Backup reply: the game turned the pilot's line down.");
+            return;
+        }
+        gFlags |= BACKUP_REPLYING;
+        LOG("Backup reply: no helicopter is up, so the pilot answers on his way in.");
     }
 
-    bool IsCallForBackup(const Speech::ScheduledSpeechEvent* event) {
-        return event->iid == &kSetup_InitialCallForBU.Id() || event->iid == &kBackup_CallForBU.Id();
-    }
-
-    void FollowBackupCalls(unsigned int now) {
-        EAXDispatch* dispatch = Dispatch();
-        if (gBackupStep == BackupStep::Pilot) {
-            if (Track(gBackupReplyLine, now) != LineState::Waiting) FinishBackupReply();
-            return;
-        }
-        if (gBackupStep == BackupStep::Dispatch) {
-            const LineState line = Track(gBackupReplyLine, now);
-            if (line == LineState::Heard)
-                PilotRepliesToBackup(dispatch, now);
-            else if (line == LineState::Dropped)
-                gBackupStep = BackupStep::Idle;
-            return;
-        }
-
-        Speech::ScheduledSpeechEvent* playing = GetCurrentEvent();
-        EAXCharacter* speaker = playing != nullptr ? playing->actor : nullptr;
-        if (playing && IsCallForBackup(playing) && speaker && speaker->GetSpeakerID() != Speech::Heli) {
-            gBackupStep = BackupStep::Called;
-            gBackupAnswered = false;
-            gBackupHeardAt = now;
-            return;
-        }
-        if (gBackupStep != BackupStep::Called) return;
-        if (playing && dispatch && speaker == dispatch) {
-            gBackupAnswered = true;
-            gBackupHeardAt = now;
-            return;
-        }
-        if (now < gBackupHeardAt || now - gBackupHeardAt > kBackupWindow) {
-            gBackupStep = BackupStep::Idle;
-            return;
-        }
-        if (playing || Speech::Manager::IsCopSpeechBusy() || IsRadioHeld(now) || gCheckInStep != CheckInStep::Idle) return;
-        if (gBackupAnswered || !dispatch) {
-            PilotRepliesToBackup(dispatch, now);
-            return;
-        }
-        ResetPlayCount(kBackup_DispBUETA);
-        Speech::ScheduledSpeechEvent* event = OwnLine([dispatch]() -> Speech::ScheduledSpeechEvent* {
-            dispatch->BackupETA();
-            return nullptr;
-        });
-        if (!Listen(gBackupReplyLine, event, now)) {
-            PilotRepliesToBackup(dispatch, now);
-            return;
-        }
-        LOG("Backup reply: dispatch never answered the unit, so she tells it backup is on the way.");
-        gBackupStep = BackupStep::Dispatch;
-    }
-
-    void NoteDispatchQuestion(unsigned int size, const void* data, const Csis::InterfaceId& iid, Speech::ScheduledSpeechEvent* event,
-                              unsigned int now) {
-        if (!gPursuitUpdateReplyOn || !event || &iid != &kAnytimeEvents_DispPursuitUpdate.Id()
-            || size < sizeof(Csis::AnytimeEvents_DispPursuitUpdateStruct))
-            return;
-        EAXAirSupport* heli = ActiveHeli();
-        const auto* asked = static_cast<const Csis::AnytimeEvents_DispPursuitUpdateStruct*>(data);
-        if (!heli || asked->subject_battalion != heli->mCallsign.name || asked->subject_call_sign_id != heli->mCallsign.number) return;
-        LOG("Pursuit update: dispatch is asking the helicopter (callsign %d/%d) for an update.", heli->mCallsign.name, heli->mCallsign.number);
-        gHeliAsked = true;
-        gHeliQuestion = { event, now, false };
-    }
-
-    void AnswerDispatchQuestion(unsigned int now) {
-        const LineState question = Track(gHeliQuestion, now);
-        if (question == LineState::Waiting && now >= gHeliQuestion.queued && now - gHeliQuestion.queued <= kUpdateReplyWindow) return;
-        gHeliAsked = false;
-        if (question != LineState::Heard) {
-            LOG("Pursuit update: dispatch's question to the helicopter never played, so the pilot stays on his usual updates.");
-            return;
-        }
-        EAXAirSupport* heli = ActiveHeli();
-        if (!heli || gHeliDown) return;
-        if (gDrivingLineSaid && now >= gDrivingLineAt && now - gDrivingLineAt < kDrivingLineGap) {
-            LOG("Pursuit update: the pilot described your driving less than a minute ago, so he gives his usual update.");
-            return;
-        }
-        if (PlayerHeat() < kDrivingLineMinHeat || PlayerSpeed() < kDrivingLineMinSpeed) {
-            LOG("Pursuit update: too slow or too little heat for the driving lines, so the pilot gives his usual update.");
-            return;
-        }
-        ResetPlayCount(kAnytimeEvents_SuspectBehaviour);
-        Csis::AnytimeEvents_SuspectBehaviourStruct data = { heli->GetSpeakerID(), Csis::Type_num_suspects_one_suspect };
-        Speech::ScheduledSpeechEvent* event = OwnLine([&data, heli] { return ScheduleSpeech(data, kAnytimeEvents_SuspectBehaviour, heli); });
-        if (!Listen(gUpdateReplyLine, event, now)) {
-            LOG("Pursuit update: the game turned the driving lines down, so the pilot gives his usual update.");
-            return;
-        }
-        LOG("Pursuit update: dispatch asked the helicopter, so the pilot answers by describing your driving.");
-        gUpdateReplyTracked = true;
-        gDrivingLineSaid = true;
-        gDrivingLineAt = now;
-    }
-
-    void BroadcastThemeChange(unsigned int now) {
-        EAXDispatch* dispatch = Dispatch();
-        if (!dispatch) return;
-        if (!HideTakes(kDispPursEscGenSample, Speech::Dispatch, kOddMultipleSuspectsTake, 1, kMultipleSuspectsTag, now))
+    void BroadcastThemeChange(EAXDispatch* dispatch) {
+        if (!HideTakes(kSPCH1_EventID_DispPursEscGen, kDispPursEscGenSample, Speech::Dispatch, kOddMultipleSuspectsTake, 1, kMultipleSuspectsTag))
             LOG("Pursuit theme: ENTRY_05440 couldn't be hidden, so all four multiple-vehicles takes can play.");
         ResetPlayCount(kAnytimeEvents_DispPursEscGen);
         Csis::AnytimeEvents_DispPursEscGenStruct data = { dispatch->GetSpeakerID(), Csis::Type_num_suspects_multiple_suspects };
-        Speech::ScheduledSpeechEvent* event = OwnLine([&data, dispatch] { return ScheduleSpeech(data, kAnytimeEvents_DispPursEscGen, dispatch); });
-        if (!Listen(gBroadcastLine, event, now)) {
+        if (!ScheduleSpeech(data, kAnytimeEvents_DispPursEscGen, dispatch)) {
             LOG("Pursuit theme: the game turned dispatch's broadcast down.");
             ShowHiddenTakes();
             return;
         }
-        gBroadcastTracked = true;
+        gFlags |= THEME_BROADCAST;
         LOG("Pursuit theme: dispatch makes her multiple-vehicles broadcast.");
     }
 
-    void NoteThemeChange(float pursuitDuration, unsigned int now) {
+    void NoteThemeChange(SoundAI* ai) {
         const int theme = SFXCTL_Pathfinder::m_curinteractive;
-        if (!gThemeKnown || pursuitDuration < kThemeSettleSeconds) {
+        if (!(gFlags & THEME_KNOWN)) {
             gPursuitTheme = theme;
-            gThemeKnown = true;
+            gFlags |= THEME_KNOWN;
             return;
         }
         if (theme == gPursuitTheme) return;
         gPursuitTheme = theme;
         LOG("Pursuit theme: the music moved on to theme %d.", theme + 1);
-        if (!ActiveHeli() || gHeliDown) {
+        if (!ai->GetHeli() || (gFlags & HELI_DOWN)) {
             LOG("Pursuit theme: no helicopter is up, so the radio waits for the next theme change.");
             return;
         }
-        if (gBroadcastTracked) return;
-        BroadcastThemeChange(now);
+        EAXDispatch* dispatch = ai->GetDispatch();
+        if (!dispatch || IsQueuedOrPlaying(kSPCH1_EventID_DispPursEscGen)) return;
+        BroadcastThemeChange(dispatch);
     }
 
-    void FollowBroadcast(unsigned int now) {
-        if (!gBroadcastTracked) return;
-        const LineState broadcast = Track(gBroadcastLine, now);
-        if (broadcast != LineState::Waiting) {
-            gBroadcastTracked = false;
-            ShowHiddenTakes();
-        }
-        if (broadcast == LineState::Heard) {
-            LOG("Pursuit theme: dispatch finished her broadcast.");
-            gVehicleReportDue = gVehicleReportOn;
-            gVehicleReportAt = now;
-        }
-    }
-
-    void ReportVehicle(EAXAirSupport* heli, unsigned int now) {
-        if (!gVehicleReportDue) return;
-        if (now < gVehicleReportAt || now - gVehicleReportAt > kVehicleReportWindow) {
-            gVehicleReportDue = false;
-            return;
-        }
-        if (!heli->IsActive() || IsRadioHeld(now)) return;
-        gVehicleReportDue = false;
-        Speech::ScheduledSpeechEvent* event = OwnLine([heli]() -> Speech::ScheduledSpeechEvent* {
-            heli->VehicleReport();
-            return nullptr;
-        });
-        Listen(gVehicleLine, event, now);
+    void SayVehicleReport() {
+        EAXAirSupport* heli = ActiveHeli();
+        if (!gVehicleReportOn || !heli || (gFlags & HELI_DOWN) || !heli->IsActive()) return;
+        heli->VehicleReport();
         LOG("Vehicle report: dispatch's theme-change broadcast is over, so the pilot describes your car (%s).",
-            event ? "queued" : "turned down by the game");
+            IsQueuedOrPlaying(kSPCH1_EventID_VehicleReport) ? "queued" : "turned down by the game");
     }
 
-    void ReportWeather(EAXAirSupport* heli, unsigned int now) {
-        const float rain = RainIntensity();
-        if (!(rain > 0.0f)) {
-            gRainReported = false;
-            return;
-        }
-        if (gRainReported || !(rain > kRainReportLevel) || !heli->IsActive()) return;
-        gRainReported = true;
+    void SayWeatherReport(EAXAirSupport* heli) {
+        if ((gFlags & RAIN_REPORTED) || !(RainIntensity() > kRainReportLevel) || !heli->IsActive()) return;
+        gFlags |= RAIN_REPORTED;
         ResetPlayCount(kAnytimeEvents_WeatherReport);
-        Speech::ScheduledSpeechEvent* event = OwnLine([heli]() -> Speech::ScheduledSpeechEvent* {
-            heli->EAXCop::WeatherReport();
-            return nullptr;
-        });
-        if (Listen(gWeatherLine, event, now)) event->priority = kInterruptPriority;
-        LOG("Weather: it started raining, so the pilot cuts in about the weather (%s).", event ? "queued" : "turned down by the game");
+        heli->EAXCop::WeatherReport();
+        LOG("Weather: it started raining, so the pilot reports the weather (%s).",
+            IsQueuedOrPlaying(kSPCH1_EventID_WeatherReport) ? "queued" : "turned down by the game");
     }
 
-    void HelicopterArrived(unsigned int now) {
-        LOG("Helicopter: a helicopter joined the chase.");
-        gHeliJoinedAt = now;
-        gRoadblockAsked = false;
-        gAirSupportWanted = false;
-        gAirSupportAsked = false;
-        const bool respawn = gHelisThisPursuit++ > 0;
-        if (gAirSupportStep == AirSupportStep::Request) {
-            LOG("Air support: a helicopter showed up before anyone asked, so nobody asks.");
-            FinishAirSupport(now, false);
-        }
-        if (respawn) {
-            if (gAirSupportStep != AirSupportStep::Ready) FinishAirSupport(now, false);
-            LOG("Helicopter: a new helicopter is in the chase, so the pilot cuts in to say he has you.");
-            gSpotPending = true;
-            gSpotInterrupt = true;
-            gSpotGameLine = SpotLine::Ours;
-            gSpotAt = now;
-            return;
-        }
-        StartCheckIn(now);
-    }
-
-    void WatchHelicopter(EAXAirSupport* heli, unsigned int now) {
-        AIVehicleHelicopter* vehicle = gHeliVehicle;
-        const bool heliOut = vehicle != nullptr;
-        if (heliOut && (!gHeliOut || vehicle != gHeliSeen)) {
-            gCheckInStep = CheckInStep::Idle;
-            gTunnelAlertPending = false;
-            gHeliDown = false;
-            gHeliAlive = false;
-            gBailoutPending = false;
-            gAnytimeEvents_Unit911Reply_DepFollow.Restore();
-            HelicopterArrived(now);
-        }
-        if (gHeliOut && !heliOut) {
-            LOG("Helicopter: it left the chase, so a unit will ask for another one when it can see you.");
-            gAirSupportWanted = true;
-            gAirSupportAsked = false;
-            gAirSupportFailures = 0;
-        }
-        gHeliOut = heliOut;
-        gHeliSeen = vehicle;
-
-        const bool dead = heli->IsDead();
-        if (heliOut && !dead) gHeliAlive = true;
-        if (dead && gHeliAlive && !gHeliDown) {
-            gHeliAlive = false;
-            gHeliDown = true;
-            gTunnelAlertPending = false;
-            LOG("Going down: the helicopter was destroyed.");
-            ReportDamage(heli, now);
-        }
-    }
-
-    void EndPursuit(unsigned int now) {
-        if (gAirSupportStep != AirSupportStep::Ready) FinishAirSupport(now, false);
-        if (gRoadblockStep != RoadblockStep::Ready) FinishRoadblock();
-        gAirSupportWanted = false;
-        gAirSupportAsked = false;
-        gRoadblockRequested = false;
+    void EndPursuit() {
+        gFlags &= RAIN_REPORTED;
         gHelisThisPursuit = 0;
-        gThemeKnown = false;
-        gBroadcastTracked = false;
-        gVehicleReportDue = false;
-        gHistoryTracked = false;
         ShowHiddenTakes();
-        if (gBackupStep != BackupStep::Idle) FinishBackupReply();
-        gHeliAsked = false;
-        gSpotPending = false;
-        gSpotInterrupt = false;
-        gSpotSaid = false;
     }
 
-    void PursuitTick(unsigned int now) {
-        ResolveBailout(now);
-        const float pursuitDuration = PursuitDuration();
-        if (pursuitDuration < 0.0f) {
-            EndPursuit(now);
-            return;
+    void OnEventComplete(SPCHType_1_EventID id, EAXCharacter* actor) {
+        switch (id) {
+        case kSPCH1_EventID_InitialCallForBU:
+        case kSPCH1_EventID_CallForBU:
+            if (actor && actor->GetSpeakerID() != Speech::Heli) gFlags |= BACKUP_CALLED;
+            break;
+        case kSPCH1_EventID_DispBackupReply:
+        case kSPCH1_EventID_DispBUETA:
+            if (!(gFlags & BACKUP_CALLED)) break;
+            gFlags &= ~BACKUP_CALLED;
+            if (gBackupReplyOn) PilotRepliesToBackup();
+            break;
+        case kSPCH1_EventID_Unit911Reply:
+            gFlags &= ~BACKUP_REPLYING;
+            if (!(gFlags & HISTORY_REQ)) break;
+            gFlags &= ~HISTORY_REQ;
+            AnswerHistoryRequest();
+            break;
+        case kSPCH1_EventID_DispPursEscGen:
+            if (!(gFlags & THEME_BROADCAST)) break;
+            gFlags &= ~THEME_BROADCAST;
+            LOG("Pursuit theme: dispatch finished her broadcast.");
+            SayVehicleReport();
+            break;
+        case kSPCH1_EventID_SuspectBehaviour:
+            gFlags &= ~DRIVING_LINE_REQ;
+            break;
+        default:
+            break;
         }
-        if (!(RainIntensity() > 0.0f)) gRainReported = false;
-        if (gThemeBroadcastOn) NoteThemeChange(pursuitDuration, now);
-        FollowBroadcast(now);
-        if (gHistoryAsked && !gHistoryTracked) AnswerHistoryRequest(now);
-        if (gBackupReplyOn) FollowBackupCalls(now);
-        if (gHeliAsked) AnswerDispatchQuestion(now);
-        FollowHistoryLine(now);
-        ExpireHiddenTakes(now);
-        if (gRoadblockRequested && !ActiveHeli()) {
-            LOG("Roadblock: no helicopter is out, so the ground units handle it.");
-            gRoadblockRequested = false;
-        }
-        if (gAirSupportWanted && gAirSupportStep == AirSupportStep::Ready && gRoadblockStep == RoadblockStep::Ready && !ActiveHeli()
-            && !Speech::Manager::IsCopSpeechBusy() && PickAirSupportCaller())
-            StartAirSupport(now);
-        AdvanceAirSupport(now);
-        if (gRoadblockOn) AdvanceRoadblock(now);
     }
 
     int __cdecl TakeOffsetHook(const void* header, int take, uint32_t* offset, uint32_t* size) {
-        if (IsHeliCheckIn(header)) NoteHistoryRequest(take, Now());
+        if (gDriverHistoryOn && IsHeliCheckIn(header) && take >= kHistoryRequestFirstTake && take <= kHistoryRequestLastTake) gFlags |= HISTORY_REQ;
         LogTake(header, take);
         return Game::Call<int>(kTakeOffset, header, take, offset, size);
     }
@@ -2043,7 +1284,7 @@ namespace {
     bool __cdecl AllowTake(const void* header, int take) {
         if (!gBackupReplyOn || !IsHeliCheckIn(header)) return true;
         const bool backupTake = take >= 0 && take < kBackupReplyTakes;
-        return gBackupReplying ? backupTake : !backupTake;
+        return (gFlags & BACKUP_REPLYING) ? backupTake : !backupTake;
     }
 
     __declspec(naked) void TakeCheckHook() {
@@ -2073,18 +1314,19 @@ namespace {
 
 }
 
-Speech::ScheduledSpeechEvent* Speech::Manager::ScheduleSpeechPartIIHook(unsigned int size, void* data, Csis::InterfaceId& iid, Csis::FunctionHandle& fh,
-                                                                        EAXCharacter* actor) {
-    const unsigned int now = Now();
-    RestoreExpiredRules(now);
-    if (!gOwnLine && IsRadioHeld(now)) return nullptr;
-    ScheduledSpeechEvent* event = Game::Call<ScheduledSpeechEvent*, unsigned int, void*, Csis::InterfaceId&, Csis::FunctionHandle&, EAXCharacter*>(
-        gScheduleSpeechPartIIOriginal, size, data, iid, fh, actor);
-    if (gOwnLine)
-        gOwnScheduled = event;
-    else
-        NoteDispatchQuestion(size, data, iid, event, now);
-    return event;
+void Speech::Manager::NotifyEventCompletion(ScheduledSpeechEvent* evt, bool playback_complete) {
+    Game::Call<void>(gNotifyEventCompletionOriginal, evt, playback_complete);
+}
+
+void Speech::Manager::NotifyEventCompletionHook(ScheduledSpeechEvent* evt, bool playback_complete) {
+    if (evt == nullptr || !playback_complete) {
+        NotifyEventCompletion(evt, playback_complete);
+        return;
+    }
+    const SPCHType_1_EventID id = evt->ID;
+    EAXCharacter* actor = evt->actor;
+    NotifyEventCompletion(evt, playback_complete);
+    OnEventComplete(id, actor);
 }
 
 void Speech::StrategyFlow::MessageReqBackup(const MReqBackup& message) {
@@ -2096,12 +1338,19 @@ void Speech::StrategyFlow::MessageReqBackupHook(const MReqBackup& message) {
     const int type = message.GetBackupType();
     if (type != kRoadblockBackupType && type != kStrategyBackupType) return;
     LOG("Roadblock: the police are setting up a roadblock.");
-    gRoadblockRequested = true;
-    gRoadblockRequestedAt = Now();
+    SoundAI* ai = SoundAI::Get();
+    EAXAirSupport* heli = ai != nullptr ? ai->GetHeli() : nullptr;
+    EAXDispatch* dispatch = ai != nullptr ? ai->GetDispatch() : nullptr;
+    if (!heli || !dispatch || (gFlags & (HELI_DOWN | RB_CALLED)) || !heli->IsActive()) {
+        LOG("Roadblock: the pilot doesn't take this request (no helicopter up, already asked, or out of sight).");
+        return;
+    }
+    gFlags |= RB_CALLED;
+    PilotCallsForRB(heli, dispatch);
 }
 
 int MiscSpeech::LostSuspectHook(int spkrID) {
-    if (SoundAI::Get() == nullptr || gHeliVehicle == nullptr) {
+    if (ActiveHeli() == nullptr) {
         if (spkrID != Speech::Heli) return LostSuspect(spkrID);
         LOG("Losing you: the helicopter is gone, so a ground unit makes the call instead of its pilot.");
         return LostSuspect(0);
@@ -2114,26 +1363,62 @@ int MiscSpeech::LostSuspectHook(int spkrID) {
     return Speech::Heli;
 }
 
-void EAXCop::UpdateHook() {
-    EAXCop::Update();
-    const unsigned int now = Now();
-    if (now == gLastPursuitTick) return;
-    gLastPursuitTick = now;
-    PursuitTick(now);
+void SoundAI::UpdateStateMachinesHook() {
+    UpdateStateMachines();
+    RestoreRulesOfFinishedLines();
+    ShowHiddenTakesOfFinishedLine();
+    if (!(RainIntensity() > 0.0f)) gFlags &= ~RAIN_REPORTED;
+    const bool inPursuit = GetPursuitDuration() >= 0.0f;
+    if (gHeliInChase != nullptr && GetHeli() == nullptr) HelicopterLeft(inPursuit);
+    if (!inPursuit) {
+        EndPursuit();
+        return;
+    }
+    if (gThemeBroadcastOn) NoteThemeChange(this);
+    if ((gFlags & AIR_SUPPORT_REQ) && GetHeli() == nullptr && !Speech::Manager::IsCopSpeechBusy()) AskForAirSupport(this);
+}
+
+void SoundAI::AddNewHeliHook(IVehicle* heli) {
+    AddNewHeli(heli);
+    if (EAXAirSupport* chopper = GetHeli()) HelicopterArrived(chopper);
+}
+
+void EAXDispatch::PursuitUpdateHook(EAXCop* cop) {
+    PursuitUpdate(cop);
+    EAXAirSupport* heli = ActiveHeli();
+    if (!gPursuitUpdateReplyOn || !heli || cop != heli || (gFlags & HELI_DOWN)) return;
+    LOG("Pursuit update: dispatch is asking the helicopter for an update.");
+    if (PlayerHeat() < kDrivingLineMinHeat || PlayerSpeed() < kDrivingLineMinSpeed) {
+        LOG("Pursuit update: too slow or too little heat for the driving lines, so the pilot gives his usual update.");
+        return;
+    }
+    ResetPlayCount(kAnytimeEvents_SuspectBehaviour);
+    Csis::AnytimeEvents_SuspectBehaviourStruct data = { heli->GetSpeakerID(), Csis::Type_num_suspects_one_suspect };
+    if (!ScheduleSpeech(data, kAnytimeEvents_SuspectBehaviour, heli)) {
+        LOG("Pursuit update: the game turned the driving lines down, so the pilot gives his usual update.");
+        return;
+    }
+    gFlags |= DRIVING_LINE_REQ;
+    LOG("Pursuit update: the pilot answers by describing your driving.");
 }
 
 void EAXAirSupport::UpdateHook() {
     EAXAirSupport::Update();
-    const unsigned int now = Now();
-    ResolveBailout(now);
-    WatchHelicopter(this, now);
-    if (!gHeliOut || gHeliDown) return;
-    CheckIn(this, now);
-    TunnelAlert(this, now);
-    PendingSpot(this, now);
-    if (gRoadblockOn) AnswerRoadblockRequest(this, now);
-    if (gWeatherReportOn) ReportWeather(this, now);
-    if (gVehicleReportOn) ReportVehicle(this, now);
+    if (gFlags & BAILOUT_REQ) {
+        gFlags &= ~BAILOUT_REQ;
+        SayGoingDown(this);
+    } else if (!(gFlags & HELI_DOWN) && IsDead()) {
+        gFlags |= HELI_DOWN;
+        LOG("Going down: the helicopter was destroyed.");
+        SayDamageReport(this);
+    }
+    if (!(gFlags & HELI_DOWN) && gWeatherReportOn) SayWeatherReport(this);
+}
+
+void EAXAirSupport::SetHandleHook(HSIMABLE handle) {
+    const HSIMABLE previous = GetHandle();
+    EAXCharacter::SetHandle(handle);
+    if (handle != nullptr && previous != nullptr && handle != previous) HelicopterArrived(this);
 }
 
 void EAXAirSupport::IntentToRamHook() {
@@ -2148,42 +1433,29 @@ void EAXAirSupport::StrategyResetHook(bool) {
 
 void EAXAirSupport::BailoutHook() {
     const bool hit = gOnCollisionReturn && reinterpret_cast<uintptr_t>(_ReturnAddress()) == gOnCollisionReturn;
-    const unsigned int now = Now();
-    if (gHeliDown) {
+    if (gFlags & HELI_DOWN) {
         LOG("Going down: skipped the game's second going-down call.");
         return;
     }
-    if (gTunnelAlertPending) LOG("Tunnel warning: dropped, the helicopter is going down.");
-    gTunnelAlertPending = false;
-    gHeliDown = true;
+    gFlags |= HELI_DOWN;
     if (hit) {
         LOG("Going down: the helicopter was hit hard, so the pilot reports damage.");
-        ReportDamage(this, now);
+        SayDamageReport(this);
         return;
     }
     if (!gBailoutCauseOn) {
-        GamesOwnBailout(this, now);
+        GamesOwnBailout(this);
         return;
     }
-
-    gBailoutPending = true;
-    gBailoutAt = now;
-    gBailoutHeli = this;
-    gBailoutFuelKnown = GetFuelTimeRemaining(this, gBailoutFuel);
-    gBailoutCause = GetCauseOfBailout();
+    gFlags |= BAILOUT_REQ;
 }
 
 void EAXAirSupport::HazardAlertHook(Csis::Type_heli_hazard_alert_type type) {
-    if (gHeliDown || IsDead()) {
+    if ((gFlags & HELI_DOWN) || IsDead()) {
         LOG("Hazard warning: dropped, the helicopter is leaving the chase.");
         return;
     }
-    if (type != Csis::Type_heli_hazard_alert_type_approaching_tunnel) {
-        EAXAirSupport::HazardAlert(type);
-        return;
-    }
-    gTunnelAlertPending = true;
-    gTunnelAlertAt = Now() + kTunnelAlertDelay;
+    EAXAirSupport::HazardAlert(type);
 }
 
 void EAXAirSupport::RegainVisualHook() {
@@ -2195,7 +1467,7 @@ void EAXAirSupport::SpottedHook() {
 }
 
 void EAXAirSupport::SwarmingHook() {
-    if (ActiveHeli() && !gHeliDown) {
+    if (ActiveHeli() && !(gFlags & HELI_DOWN)) {
         EAXAirSupport::Swarming();
         return;
     }
@@ -2203,11 +1475,8 @@ void EAXAirSupport::SwarmingHook() {
 }
 
 void EAXAirSupport::PursuitUpdateReplyHook() {
-    const unsigned int now = Now();
-    if (gUpdateReplyTracked && Track(gUpdateReplyLine, now) == LineState::Waiting) return;
-    if (gHeliAsked && now >= gHeliQuestion.queued && now - gHeliQuestion.queued <= kUpdateReplyWindow
-        && Track(gHeliQuestion, now) != LineState::Dropped)
-        return;
+    if ((gFlags & DRIVING_LINE_REQ) && IsQueuedOrPlaying(kSPCH1_EventID_SuspectBehaviour)) return;
+    gFlags &= ~DRIVING_LINE_REQ;
     EAXCop::PursuitUpdateReply();
 }
 
@@ -2238,14 +1507,17 @@ bool SoundAI::Init(void* module) {
         LOG("%s restored: the pilot alternates the 'go again' and 'hold on station' takes when he calls a reset.", kOutcome_StrategyReset.name);
 
     const bool lostSuspect = kAnytimeEvents_LostSuspect.Verify()
-                          && Patch::RedirectCall(kAnytimeEvents_LostSuspect.name, kTerminatePursuitLostSuspectCall, kMiscSpeech_LostSuspect,
+                          && Patch::RedirectCall("SoundAI::TerminatePursuit", kTerminatePursuitLostSuspectCall, kMiscSpeech_LostSuspect,
                                                  reinterpret_cast<const void*>(&MiscSpeech::LostSuspectHook));
     if (lostSuspect)
         LOG("%s restored: the pilot calls it when the police lose you while a helicopter is out.", kAnytimeEvents_LostSuspect.name);
 
+    const bool heliUpdate = Patch::ReplaceVirtual("EAXAirSupport::Update", kEAXAirSupportVTable, kUpdateSlot, kEAXAirSupport_Update,
+                                                  Game::MethodAddress(&EAXAirSupport::UpdateHook));
+
     if (Memory::Matches(kOnCollisionBailout, kOnCollisionBailoutCode, sizeof(kOnCollisionBailoutCode)))
         gOnCollisionReturn = kOnCollisionBailout + sizeof(kOnCollisionBailoutCode);
-    gBailoutCauseOn = Memory::Matches(kEAXAirSupportUpdateFuelCheck, kEAXAirSupportUpdateFuelCheckCode, sizeof(kEAXAirSupportUpdateFuelCheckCode))
+    gBailoutCauseOn = heliUpdate && Memory::Matches(kEAXAirSupportUpdateFuelCheck, kEAXAirSupportUpdateFuelCheckCode, sizeof(kEAXAirSupportUpdateFuelCheckCode))
                    && Patch::CallsTo(kBailoutGetCauseOfBailoutCall, kEAXAirSupport_GetCauseOfBailout);
     const bool bailout = ReplaceVirtual(kHeliSpecific_HeliBailout, kEAXAirSupportVTable, kBailoutSlot, &EAXAirSupport::BailoutHook);
     if (bailout && gBailoutCauseOn)
@@ -2265,23 +1537,29 @@ bool SoundAI::Init(void* module) {
     if (canPlayback)
         LOG("Police radio: lines that already played can keep playing later in long pursuits.");
 
-    const bool heliUpdate = Patch::ReplaceVirtual("EAXAirSupport::Update", kEAXAirSupportVTable, kUpdateSlot, kEAXAirSupport_Update,
-                                                  Game::MethodAddress(&EAXAirSupport::UpdateHook));
-    const bool scheduleHooked = heliUpdate
-                             && Patch::Detour("Speech::Manager::ScheduleSpeechPartII", kManager_ScheduleSpeechPartII, kScheduleSpeechPartIIEntry,
-                                              sizeof(kScheduleSpeechPartIIEntry), reinterpret_cast<const void*>(&Speech::Manager::ScheduleSpeechPartIIHook),
-                                              gScheduleSpeechPartIIOriginal);
+    const bool stateMachines = Patch::CallsTo(kOnTaskUpdateStateMachinesCall, kSoundAI_UpdateStateMachines)
+                            && Patch::RedirectCall("SoundAI::UpdateStateMachines", kOnTaskUpdateStateMachinesCall, kSoundAI_UpdateStateMachines,
+                                                   Game::MethodAddress(&SoundAI::UpdateStateMachinesHook));
+    const bool eventComplete = Patch::Detour("Speech::Manager::NotifyEventCompletion", kManager_NotifyEventCompletion, kNotifyEventCompletionEntry,
+                                             sizeof(kNotifyEventCompletionEntry), reinterpret_cast<const void*>(&Speech::Manager::NotifyEventCompletionHook),
+                                             gNotifyEventCompletionOriginal);
+    const bool heliArrival = Patch::CallsTo(kSyncCarsToActorsAddNewHeliCall, kSoundAI_AddNewHeli)
+                          && Patch::RedirectCall("SoundAI::AddNewHeli", kSyncCarsToActorsAddNewHeliCall, kSoundAI_AddNewHeli,
+                                                 Game::MethodAddress(&SoundAI::AddNewHeliHook))
+                          && Patch::ReplaceVirtual("EAXCharacter::SetHandle", kEAXAirSupportVTable, kSetHandleSlot, kEAXCharacter_SetHandle,
+                                                   Game::MethodAddress(&EAXAirSupport::SetHandleHook));
+    if (!stateMachines || !eventComplete || !heliArrival)
+        LOG("SoundAI: another mod changed the speech flows this mod hooks, so the radio exchanges below are off.");
 
-    gAirSupportOn = scheduleHooked && kBackup_CallForBU.VerifyVirtual(kEAXCopVTable, kCallForBackupSlot) && kBackup_DispBackupReply.Verify()
-                 && Patch::ReplaceVirtual("EAXCop::Update", kEAXCopVTable, kUpdateSlot, kEAXCop_Update, Game::MethodAddress(&EAXCop::UpdateHook));
+    gAirSupportOn = stateMachines && kBackup_CallForBU.VerifyVirtual(kEAXCopVTable, kCallForBackupSlot) && kBackup_DispBackupReply.Verify();
     if (gAirSupportOn)
         LOG("%s restored: when a helicopter goes down, a unit that can see you asks for another one on the radio.", kBackup_CallForBU.name);
 
-    gCheckInOn = scheduleHooked && kAnytimeEvents_Unit911Reply.VerifyVirtual(kEAXAirSupportVTable, kReply911Slot);
+    gCheckInOn = heliArrival && eventComplete && kAnytimeEvents_Unit911Reply.VerifyVirtual(kEAXAirSupportVTable, kReply911Slot);
     if (gCheckInOn)
         LOG("%s restored: the pilot checks in when the first helicopter joins.", kAnytimeEvents_Unit911Reply.name);
 
-    gRoadblockOn = gAirSupportOn && kStaticRoadblock_DispRBUpdate.Verify() && kStaticRoadblock_CallForRB.Verify()
+    gRoadblockOn = heliArrival && kStaticRoadblock_DispRBUpdate.Verify() && kStaticRoadblock_CallForRB.Verify()
                 && Patch::Detour("Speech::StrategyFlow::MessageReqBackup", kStrategyFlow_MessageReqBackup, kMessageReqBackupEntry,
                                  sizeof(kMessageReqBackupEntry), Game::MethodAddress(&Speech::StrategyFlow::MessageReqBackupHook),
                                  gMessageReqBackupOriginal);
@@ -2293,7 +1571,7 @@ bool SoundAI::Init(void* module) {
                           && Patch::RedirectCall("Speech player take lookup", kTakeOffsetCall, kTakeOffset, reinterpret_cast<const void*>(&TakeOffsetHook));
     if (!takesHooked)
         LOG("Speech player: another mod changed the game's take lookup, so take-based calls are off.");
-    gDriverHistoryOn = takesHooked && scheduleHooked && kAnytimeEvents_DriverHistory.Verify();
+    gDriverHistoryOn = takesHooked && eventComplete && kAnytimeEvents_DriverHistory.Verify();
     if (gDriverHistoryOn)
         LOG("%s restored: when the pilot asks for your history at heat 5 and up, dispatch reads out your record.", kAnytimeEvents_DriverHistory.name);
 
@@ -2305,12 +1583,15 @@ bool SoundAI::Init(void* module) {
                                && Patch::RedirectCall("Speech player take choice", kTakeCheckCall, kTakeCheck, reinterpret_cast<const void*>(&TakeCheckHook));
     if (takesHooked && gCheckInOn && !takeChoiceHooked)
         LOG("Speech player: another mod changed how the game picks takes, so the pilot's backup reply is off.");
-    gBackupReplyOn = takeChoiceHooked && kBackup_DispBUETA.Verify();
+    gBackupReplyOn = takeChoiceHooked;
     if (gBackupReplyOn)
         LOG("%s: after a unit calls for backup and dispatch answers, the pilot now and then answers too.", kBackup_CallForBU.name);
 
-    gPursuitUpdateReplyOn = scheduleHooked && kAnytimeEvents_SuspectBehaviour.VerifyVirtual(kEAXAirSupportVTable, kSuspectBehaviorSlot)
-                         && ReplaceVirtual(kAnytimeEvents_PursuitUpdateRep, kEAXAirSupportVTable, kPursuitUpdateReplySlot, &EAXAirSupport::PursuitUpdateReplyHook);
+    gPursuitUpdateReplyOn = kAnytimeEvents_SuspectBehaviour.VerifyVirtual(kEAXAirSupportVTable, kSuspectBehaviorSlot)
+                         && Patch::CallsTo(kDealWithDeadAirPursuitUpdateCall, kEAXDispatch_PursuitUpdate)
+                         && ReplaceVirtual(kAnytimeEvents_PursuitUpdateRep, kEAXAirSupportVTable, kPursuitUpdateReplySlot, &EAXAirSupport::PursuitUpdateReplyHook)
+                         && Patch::RedirectCall("EAXDispatch::PursuitUpdate", kDealWithDeadAirPursuitUpdateCall, kEAXDispatch_PursuitUpdate,
+                                                Game::MethodAddress(&EAXDispatch::PursuitUpdateHook));
     if (gPursuitUpdateReplyOn)
         LOG("%s restored: when dispatch asks the helicopter for an update, the pilot describes your driving.", kAnytimeEvents_PursuitUpdateRep.name);
     const bool suspectBehavior = gPursuitUpdateReplyOn
@@ -2319,16 +1600,16 @@ bool SoundAI::Init(void* module) {
         LOG("%s fixed: the pilot only describes your driving when dispatch asks him; the game's own driving calls go to ground units.",
             kAnytimeEvents_SuspectBehaviour.name);
 
-    gThemeBroadcastOn = scheduleHooked && kAnytimeEvents_DispPursEscGen.Verify();
+    gThemeBroadcastOn = stateMachines && eventComplete && kAnytimeEvents_DispPursEscGen.Verify();
     if (gThemeBroadcastOn)
         LOG("%s: when the pursuit music moves to the next theme and a helicopter is up, dispatch makes a broadcast.", kAnytimeEvents_DispPursEscGen.name);
-    gVehicleReportOn = scheduleHooked && kSetup_VehicleReport.VerifyVirtual(kEAXAirSupportVTable, kVehicleReportSlot);
+    gVehicleReportOn = gThemeBroadcastOn && kSetup_VehicleReport.VerifyVirtual(kEAXAirSupportVTable, kVehicleReportSlot);
     if (gVehicleReportOn)
         LOG("%s restored: after dispatch's theme-change broadcast, the pilot describes your car.", kSetup_VehicleReport.name);
 
-    gWeatherReportOn = heliUpdate && kAnytimeEvents_WeatherReport.VerifyVirtual(kEAXAirSupportVTable, kWeatherReportSlot);
+    gWeatherReportOn = heliUpdate && stateMachines && kAnytimeEvents_WeatherReport.VerifyVirtual(kEAXAirSupportVTable, kWeatherReportSlot);
     if (gWeatherReportOn)
-        LOG("%s restored: when it starts raining, the pilot cuts in about the weather.", kAnytimeEvents_WeatherReport.name);
+        LOG("%s restored: when it starts raining, the pilot reports the weather.", kAnytimeEvents_WeatherReport.name);
 
     return intentToRam || strategyReset || lostSuspect || bailout || regainVisual || canPlayback || gAirSupportOn || gCheckInOn || gRoadblockOn
         || gDriverHistoryOn || gSwarmingOn || gBackupReplyOn || gPursuitUpdateReplyOn || gThemeBroadcastOn || gVehicleReportOn || gWeatherReportOn;

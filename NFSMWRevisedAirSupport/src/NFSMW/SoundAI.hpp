@@ -5,7 +5,7 @@ struct HSIMABLE__;
 typedef HSIMABLE__* HSIMABLE;
 
 class WRoadNav;
-class AIVehicleHelicopter;
+class IVehicle;
 
 namespace UMath {
 
@@ -19,9 +19,6 @@ class Timer {
   public:
     int PackedTime;
 };
-
-extern Timer&               WorldTimer;
-extern AIVehicleHelicopter*& gHeliVehicle;
 
 enum SPCHType_1_EventID {
     kSPCH1_EventID_CallForBU         = 67,
@@ -158,10 +155,8 @@ namespace Csis {
         Type_num_suspects num_suspects;
     };
 
-    struct AnytimeEvents_DispPursuitUpdateStruct {
+    struct AnytimeEvents_WeatherReportStruct {
         int speaker_id;
-        int subject_battalion;
-        int subject_call_sign_id;
     };
 
 }
@@ -294,40 +289,21 @@ namespace Speech {
         History* Find(SPCHType_1_EventID id);
     };
 
-    struct SchedSpchEvents {
-        unsigned char          mList[0x8];
-        ScheduledSpeechEvent** mBegin;
-        ScheduledSpeechEvent** mEnd;
-        ScheduledSpeechEvent** mCapacityEnd;
-    };
-
-    class Module {};
-
-    class GameSpeech : public Module {
-      public:
-        ScheduledSpeechEvent* GetCurrentEvent() {
-            return m_currEvent;
-        }
-
-        unsigned char         mModule[0x88];
-        ScheduledSpeechEvent* m_currEvent;
-    };
-
     struct Manager {
         static ScheduledSpeechEvent* ScheduleSpeechPartII(unsigned int size, void* data, Csis::InterfaceId& iid, Csis::FunctionHandle& fh,
                                                           EAXCharacter* actor);
+        static void NotifyEventCompletion(ScheduledSpeechEvent* evt, bool playback_complete);
         static bool IsCopSpeechBusy();
+        static bool IsQueued(SPCHType_1_EventID evtID, int indices);
+        static bool IsCopSpeechPlaying(SPCHType_1_EventID event_id);
 
         static EventHistory& GetHistory() {
             return mGlobalHistory;
         }
 
-        static ScheduledSpeechEvent* ScheduleSpeechPartIIHook(unsigned int size, void* data, Csis::InterfaceId& iid, Csis::FunctionHandle& fh,
-                                                              EAXCharacter* actor);
+        static void NotifyEventCompletionHook(ScheduledSpeechEvent* evt, bool playback_complete);
 
-        static Module* (&m_SpeechModule)[2];
-        static EventHistory&    mGlobalHistory;
-        static SchedSpchEvents (&mEvents)[4];
+        static EventHistory& mGlobalHistory;
     };
 
     class StrategyFlow {
@@ -343,14 +319,6 @@ namespace Speech {
 
     class copMap {
       public:
-        copPair* begin() const {
-            return mBegin;
-        }
-
-        copPair* end() const {
-            return mEnd;
-        }
-
         void*    mAllocator;
         copPair* mBegin;
         copPair* mEnd;
@@ -515,16 +483,14 @@ class EAXCop : public EAXCharacter {
     virtual void Impact_Suspect_GasStation();
     virtual void Impact_Suspect_Spikebelt();
     virtual void Impact_Suspect_Traffic(Csis::Type_intensity intensity);
-
-    void Update() override;
-
-    void UpdateHook();
 };
 
 class EAXDispatch : public EAXCharacter {
   public:
     void BackupReply(EAXCop* cop, int yes, int type);
-    void BackupETA();
+    void PursuitUpdate(EAXCop* cop);
+
+    void PursuitUpdateHook(EAXCop* cop);
 };
 
 class EAXAirSupport : public EAXCop {
@@ -541,6 +507,7 @@ class EAXAirSupport : public EAXCop {
     Csis::Type_heli_bailout_type GetCauseOfBailout();
 
     void UpdateHook();
+    void SetHandleHook(HSIMABLE handle);
     void IntentToRamHook();
     void StrategyResetHook(bool new_strategy);
     void BailoutHook();
@@ -580,10 +547,6 @@ class SoundAI {
     static bool     Init(void* module);
     static void     Restore();
 
-    const Speech::copMap& GetActors() {
-        return mActors;
-    }
-
     EAXAirSupport* GetHeli() {
         return mHeli;
     }
@@ -608,7 +571,13 @@ class SoundAI {
         return mPursuitDuration;
     }
 
+    EAXCop* GetRandomActiveCop(int type, bool reqLOS);
+    void    UpdateStateMachines();
     EAXCop* FindClosestCop(bool enforceLOS, bool includeHeli);
+    void    AddNewHeli(IVehicle* heli);
+
+    void UpdateStateMachinesHook();
+    void AddNewHeliHook(IVehicle* heli);
 
     unsigned char  mActivity[0x54];
     unsigned int   mFlags;
