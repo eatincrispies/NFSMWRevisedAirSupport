@@ -521,6 +521,8 @@ class EAXCop : public EAXCharacter {
     virtual void Impact_Suspect_GasStation();
     virtual void Impact_Suspect_Spikebelt();
     virtual void Impact_Suspect_Traffic(Csis::Type_intensity intensity);
+
+    void ReinitiatePursuitHook();
 };
 
 class EAXDispatch : public EAXCharacter {};
@@ -549,7 +551,7 @@ class EAXAirSupport : public EAXCop {
     void IntentToRamPullBack();
     void RegainVisualAfterRespawn();
     void VehicleReportOnFirstSighting();
-    void SpotterWantedDuringCooldown();
+    void SpotterWantedOnReacquire();
     void SpotterWantedForEscapedCar();
     void CallForRBAhead(IRoadBlock* roadblock);
 };
@@ -640,6 +642,10 @@ class SoundAI {
         return mFocus;
     }
 
+    const int NumCopsWithLOS() {
+        return mLOSCount;
+    }
+
     const Attrib::Gen::pvehicle& GetPlayerSpecs() {
         return mPVehicle;
     }
@@ -649,10 +655,12 @@ class SoundAI {
     }
 
     IRoadBlock* GetRoadblock();
+    void SyncPursuit();
     void TerminatePursuit(BailoutType type);
     void ResetPursuit(bool including_music);
     void AddNewHeli(IVehicle* heli);
 
+    void SyncPursuitHook();
     void TerminatePursuitHook(BailoutType type);
     void ResetPursuitHook(bool including_music);
     void AddNewHeliHook(IVehicle* heli);
@@ -671,7 +679,11 @@ class SoundAI {
     float          mPlayerSpeed;
     unsigned char  mPlayerDetails[0x2C];
     int            mFocus;
-    unsigned char  mPursuitDetails[0x2C];
+    float          mPursuitDist;
+    float          mPursuitDuration;
+    float          mT_PerpLastSeen;
+    short          mLOSCount;
+    unsigned char  mPursuitDetails[0x1E];
     Attrib::Gen::pvehicle mPVehicle;
     unsigned char  mTuneAndFlows[0x58];
     PursuitState   mPursuitState;

@@ -95,6 +95,15 @@ namespace Patch {
         return Replace(call, expected, hook, sizeof(hook));
     }
 
+    bool RedirectVirtualCall(uintptr_t call, const uint8_t* code, size_t length, const void* replacement) {
+        uint8_t hook[16] = { kCall };
+        if (length < 5 || length > sizeof(hook)) return false;
+        const uint32_t hookOffset = BranchOffset(call, reinterpret_cast<uintptr_t>(replacement));
+        std::memcpy(hook + 1, &hookOffset, sizeof(hookOffset));
+        for (size_t i = 5; i < length; ++i) hook[i] = kNop;
+        return Replace(call, code, hook, length);
+    }
+
     bool Detour(uintptr_t function, const uint8_t* code, size_t length, const void* replacement, uintptr_t& original) {
         auto* trampoline = static_cast<uint8_t*>(VirtualAlloc(nullptr, length + 5, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE));
         if (!trampoline) return false;
@@ -181,6 +190,10 @@ namespace {
     constexpr uint8_t   kSoundAIOnCollisionEntry[6]         = { 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00 };
     constexpr uintptr_t kEAXCharacter_SetHandle             = 0x007001D0u;
     constexpr uintptr_t kEAXCharacter_SetLOS                = 0x00700300u;
+    constexpr uintptr_t kSoundAI_SyncPursuit                = 0x00720850u;
+    constexpr uintptr_t kOnTaskSyncPursuitCall              = 0x00721609u;
+    constexpr uintptr_t kPrimaryBranchReinitiatePursuitCall = 0x00719D51u;
+    constexpr uint8_t   kPrimaryBranchReinitiatePursuitCode[6] = { 0xFF, 0x92, 0xE8, 0x00, 0x00, 0x00 };
     constexpr uintptr_t kSoundAI_TerminatePursuit           = 0x0071F6E0u;
     constexpr uint8_t   kTerminatePursuitEntry[8]           = { 0x8B, 0x44, 0x24, 0x04, 0x83, 0xEC, 0x08, 0x48 };
     constexpr uintptr_t kTerminatePursuitLostSuspectCall    = 0x0071F758u;
@@ -280,6 +293,7 @@ namespace {
     static_assert(offsetof(SoundAI, mPursuitState) == 0x1D4, "SoundAI::mPursuitState");
     static_assert(offsetof(SoundAI, mFlags) == 0x54, "SoundAI::mFlags");
     static_assert(offsetof(SoundAI, mFocus) == 0x138, "SoundAI::mFocus");
+    static_assert(offsetof(SoundAI, mLOSCount) == 0x148, "SoundAI::mLOSCount");
     static_assert(offsetof(SoundAI, mPVehicle) == 0x168, "SoundAI::mPVehicle");
     static_assert(offsetof(SoundAI, mPlayerCarCustom) == 0x230, "SoundAI::mPlayerCarCustom");
     static_assert(offsetof(Attrib::Gen::pvehicle, mLayoutPtr) == 0x08, "Attrib::Gen::pvehicle::mLayoutPtr");
@@ -309,6 +323,7 @@ namespace {
     bool                 gRespawnedHeliSpotting = false;
     bool                 gFirstHeliSpotting     = false;
     bool                 gSpotterWantedOn       = false;
+    bool                 gPilotReacquired       = false;
     bool                 gKillShotSaid          = false;
     Timer                gRoadblockSetupHeard   = { -1 };
 
@@ -408,6 +423,10 @@ SoundAI* SoundAI::Get() {
     return Game::Global<SoundAI*>(kSingleton_SoundAI_mInstance);
 }
 
+void SoundAI::SyncPursuit() {
+    Game::ThisCall<void>(kSoundAI_SyncPursuit, this);
+}
+
 void SoundAI::TerminatePursuit(BailoutType type) {
     Game::ThisCall<void>(gTerminatePursuitOriginal, this, type);
 }
@@ -461,6 +480,13 @@ namespace {
 
     bool IsQueuedOrPlaying(SPCHType_1_EventID id) {
         return Speech::Manager::IsQueued(id, kAllEventQueues) || Speech::Manager::IsCopSpeechPlaying(id);
+    }
+
+    EAXAirSupport* HeliWithOnlyLOS() {
+        SoundAI* copspeech = SoundAI::Get();
+        EAXAirSupport* heli = copspeech != nullptr ? copspeech->GetHeli() : nullptr;
+        if (heli == nullptr || heli->IsDead() || !heli->IsActive() || !heli->HasLOS() || copspeech->NumCopsWithLOS() > 0) return nullptr;
+        return heli;
     }
 
     bool DescribePlayerCar(SoundAI* copspeech, DescribedCar& car) {
@@ -620,7 +646,7 @@ void EAXAirSupport::VehicleReportOnFirstSighting() {
     EAXCop::VehicleReport();
 }
 
-void EAXAirSupport::SpotterWantedDuringCooldown() {
+void EAXAirSupport::SpotterWantedOnReacquire() {
     gRespawnedHeliSpotting = false;
     gFirstHeliSpotting = false;
     if (IsQueuedOrPlaying(kSPCH1_EventID_SpotterWanted)) return;
@@ -675,10 +701,8 @@ void EAXAirSupport::SetLOSHook(bool yes) {
     EAXAirSupport::SetLOS(yes);
     if (!spotted || !IsActive()) return;
     SoundAI* copspeech = SoundAI::Get();
-    const bool inCooldown = copspeech != nullptr && copspeech->GetFocus() == SoundAI::kLost;
-    if (gSpotterWantedOn && inCooldown) {
-        SpotterWantedDuringCooldown();
-    } else if (gRespawnedHeliSpotting) {
+    if (copspeech != nullptr && copspeech->GetFocus() == SoundAI::kLost) return;
+    if (gRespawnedHeliSpotting) {
         gRespawnedHeliSpotting = false;
         RegainVisualAfterRespawn();
     } else if (gFirstHeliSpotting) {
@@ -686,6 +710,14 @@ void EAXAirSupport::SetLOSHook(bool yes) {
         if (gSpotterWantedOn && IsEscapedPlayerCar()) SpotterWantedForEscapedCar();
         VehicleReportOnFirstSighting();
     }
+}
+
+void EAXCop::ReinitiatePursuitHook() {
+    if (gPilotReacquired) {
+        gPilotReacquired = false;
+        return;
+    }
+    ReinitiatePursuit();
 }
 
 void AIActionHeliPursuit::SkidHitPursuitHook() {
@@ -752,11 +784,21 @@ void SoundAI::ResetPursuitHook(bool including_music) {
     gRespawnedHeliSpotting = false;
     gFirstHeliSpotting = false;
     gKillShotSaid = false;
+    gPilotReacquired = false;
 }
 
 void SoundAI::AddNewHeliHook(IVehicle* heli) {
     AddNewHeli(heli);
     if (GetHeli() != nullptr) HelicopterArrived();
+}
+
+void SoundAI::SyncPursuitHook() {
+    const int focus = GetFocus();
+    SyncPursuit();
+    if (focus != kLost || GetFocus() != kPursuitFlow) return;
+    EAXAirSupport* heli = HeliWithOnlyLOS();
+    gPilotReacquired = heli != nullptr;
+    if (heli != nullptr) heli->SpotterWantedOnReacquire();
 }
 
 void SoundAI::TerminatePursuitHook(BailoutType type) {
@@ -792,6 +834,10 @@ bool SoundAI::Init(void*) {
                             && Patch::Detour(kManager_IndirectSpeechEvent, kIndirectSpeechEventEntry, sizeof(kIndirectSpeechEventEntry),
                                              reinterpret_cast<const void*>(&Speech::Manager::IndirectSpeechEventHook), gIndirectSpeechEventOriginal);
     gSpotterWantedOn = respawnSpot && kSetup_SpotterWanted.Verify();
+    const bool reacquire = gSpotterWantedOn
+                        && Patch::RedirectCall(kOnTaskSyncPursuitCall, kSoundAI_SyncPursuit, Game::MethodAddress(&SoundAI::SyncPursuitHook))
+                        && Patch::RedirectVirtualCall(kPrimaryBranchReinitiatePursuitCall, kPrimaryBranchReinitiatePursuitCode,
+                                                      sizeof(kPrimaryBranchReinitiatePursuitCode), Game::MethodAddress(&EAXCop::ReinitiatePursuitHook));
     const bool killShot = kHeliSpecific_HeliBailout.Verify()
                        && Patch::ReplaceVirtual(kEAXAirSupportVTable, kBailoutSlot, kEAXAirSupport_Bailout, Game::MethodAddress(&EAXAirSupport::BailoutHook))
                        && Patch::ReplaceVirtual(kEAXAirSupportVTable, kUpdateSlot, kEAXAirSupport_Update, Game::MethodAddress(&EAXAirSupport::UpdateHook));
@@ -803,7 +849,7 @@ bool SoundAI::Init(void*) {
                             && Patch::RedirectCall(kTerminatePursuitLostSuspectCall, kMiscSpeech_LostSuspect, reinterpret_cast<const void*>(&MiscSpeech::LostSuspectHook))
                             && Patch::Detour(kSoundAI_TerminatePursuit, kTerminatePursuitEntry, sizeof(kTerminatePursuitEntry),
                                              Game::MethodAddress(&SoundAI::TerminatePursuitHook), gTerminatePursuitOriginal);
-    return intentToRam || pullBack || respawnSpot || vehicleReport || beenHit || killShot || roadblockAhead || searchPattern;
+    return intentToRam || pullBack || respawnSpot || vehicleReport || reacquire || beenHit || killShot || roadblockAhead || searchPattern;
 }
 
 void SoundAI::Restore() {
