@@ -347,8 +347,10 @@ namespace Speech {
 
         static Csis::Result IndirectSpeechEventHook(ScheduledSpeechEvent* evt, bool test_only);
         static SpeechValRtnType PostValidateHook(ScheduledSpeechEvent* evt, unsigned int mask);
+        static void CalcProbPlaybackHook();
 
         static EventHistory& mGlobalHistory;
+        static float&        mProbPlayback;
 
         static Module* (&m_SpeechModule)[2];
     };

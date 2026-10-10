@@ -207,10 +207,16 @@ namespace {
     constexpr uintptr_t kSoundAI_GetRoadblock               = 0x00704E00u;
     constexpr uintptr_t kRoadblockFlow_Setup                = 0x0071EF50u;
     constexpr uintptr_t kRoadblockFlowServiceSetupCall      = 0x0071F486u;
+    constexpr uintptr_t kManager_CalcProbPlayback           = 0x00704570u;
+    constexpr uintptr_t kUpdateCalcProbPlaybackCall         = 0x00709B31u;
+    constexpr uintptr_t kManager_mProbPlayback              = 0x00901BC0u;
     constexpr uintptr_t kManager_PostValidate               = 0x0070C600u;
     constexpr uint8_t   kPostValidateEntry[6]               = { 0x64, 0xA1, 0x00, 0x00, 0x00, 0x00 };
+    constexpr unsigned  kIntervalCheck                      = 0x08u;
+    constexpr unsigned  kCullingRangeCheck                  = 0x10u;
     constexpr unsigned  kDepFollowCheck                     = 0x20u;
     constexpr unsigned  kOnScreenOnlyCheck                  = 0x40u;
+    constexpr unsigned  kPlayerSpeedCheck                   = 0x200u;
 
     constexpr uintptr_t kEAXAirSupportVTable = 0x008B2278u;
     constexpr unsigned  kSetHandleSlot       = 0x2Cu;
@@ -343,6 +349,7 @@ namespace {
 
 Speech::Module* (&Speech::Manager::m_SpeechModule)[2] = Game::Global<Speech::Module* [2]>(kManager_m_SpeechModule);
 Speech::EventHistory& Speech::Manager::mGlobalHistory  = Game::Global<Speech::EventHistory>(kManager_mGlobalHistory);
+float&                Speech::Manager::mProbPlayback   = Game::Global<float>(kManager_mProbPlayback);
 cFrontendDatabase*&   FEDatabase                       = Game::Global<cFrontendDatabase*>(kFEDatabase);
 
 void* Speech::ScheduledSpeechEvent::GetData(unsigned int* datasize) {
@@ -755,9 +762,17 @@ Csis::Result Speech::Manager::IndirectSpeechEventHook(ScheduledSpeechEvent* evt,
 
 SpeechValRtnType Speech::Manager::PostValidateHook(ScheduledSpeechEvent* evt, unsigned int mask) {
     SoundAI* copspeech = SoundAI::Get();
-    if (evt != nullptr && evt->ID == kSPCH1_EventID_CallForRB && copspeech != nullptr && evt->actor != nullptr && evt->actor == copspeech->GetHeli())
-        mask &= ~(kDepFollowCheck | kOnScreenOnlyCheck);
+    if (evt != nullptr && copspeech != nullptr && evt->actor != nullptr && evt->actor == copspeech->GetHeli()) {
+        if (evt->ID == kSPCH1_EventID_CallForRB)
+            mask &= ~(kDepFollowCheck | kOnScreenOnlyCheck);
+        else if (evt->ID == kSPCH1_EventID_SpotterWanted)
+            mask &= ~(kIntervalCheck | kCullingRangeCheck | kPlayerSpeedCheck);
+    }
     return PostValidate(evt, mask);
+}
+
+void Speech::Manager::CalcProbPlaybackHook() {
+    mProbPlayback = 1.0f;
 }
 
 void Speech::RoadblockFlow::SetupHook() {
@@ -833,6 +848,8 @@ bool SoundAI::Init(void*) {
     const bool vehicleReport = respawnSpot && kSetup_VehicleReport.Verify()
                             && Patch::Detour(kManager_IndirectSpeechEvent, kIndirectSpeechEventEntry, sizeof(kIndirectSpeechEventEntry),
                                              reinterpret_cast<const void*>(&Speech::Manager::IndirectSpeechEventHook), gIndirectSpeechEventOriginal);
+    const bool postValidate = Patch::Detour(kManager_PostValidate, kPostValidateEntry, sizeof(kPostValidateEntry),
+                                            reinterpret_cast<const void*>(&Speech::Manager::PostValidateHook), gPostValidateOriginal);
     gSpotterWantedOn = respawnSpot && kSetup_SpotterWanted.Verify();
     const bool reacquire = gSpotterWantedOn
                         && Patch::RedirectCall(kOnTaskSyncPursuitCall, kSoundAI_SyncPursuit, Game::MethodAddress(&SoundAI::SyncPursuitHook))
@@ -841,15 +858,15 @@ bool SoundAI::Init(void*) {
     const bool killShot = kHeliSpecific_HeliBailout.Verify()
                        && Patch::ReplaceVirtual(kEAXAirSupportVTable, kBailoutSlot, kEAXAirSupport_Bailout, Game::MethodAddress(&EAXAirSupport::BailoutHook))
                        && Patch::ReplaceVirtual(kEAXAirSupportVTable, kUpdateSlot, kEAXAirSupport_Update, Game::MethodAddress(&EAXAirSupport::UpdateHook));
-    const bool roadblockAhead = kStaticRoadblock_CallForRB.Verify()
-                             && Patch::Detour(kManager_PostValidate, kPostValidateEntry, sizeof(kPostValidateEntry),
-                                              reinterpret_cast<const void*>(&Speech::Manager::PostValidateHook), gPostValidateOriginal)
+    const bool roadblockAhead = kStaticRoadblock_CallForRB.Verify() && postValidate
                              && Patch::RedirectCall(kRoadblockFlowServiceSetupCall, kRoadblockFlow_Setup, Game::MethodAddress(&Speech::RoadblockFlow::SetupHook));
     const bool searchPattern = kAnytimeEvents_LostSuspect.Verify()
                             && Patch::RedirectCall(kTerminatePursuitLostSuspectCall, kMiscSpeech_LostSuspect, reinterpret_cast<const void*>(&MiscSpeech::LostSuspectHook))
                             && Patch::Detour(kSoundAI_TerminatePursuit, kTerminatePursuitEntry, sizeof(kTerminatePursuitEntry),
                                              Game::MethodAddress(&SoundAI::TerminatePursuitHook), gTerminatePursuitOriginal);
-    return intentToRam || pullBack || respawnSpot || vehicleReport || reacquire || beenHit || killShot || roadblockAhead || searchPattern;
+    const bool noDropoff = Patch::RedirectCall(kUpdateCalcProbPlaybackCall, kManager_CalcProbPlayback,
+                                               reinterpret_cast<const void*>(&Speech::Manager::CalcProbPlaybackHook));
+    return intentToRam || pullBack || respawnSpot || vehicleReport || reacquire || beenHit || killShot || roadblockAhead || searchPattern || noDropoff;
 }
 
 void SoundAI::Restore() {
