@@ -1,11 +1,17 @@
 #pragma once
-#include <cstdint>
 
 struct HSIMABLE__;
 typedef HSIMABLE__* HSIMABLE;
 
-class WRoadNav;
 class IVehicle;
+class IVehicleAI;
+class IRigidBody;
+class IAIHelicopter;
+class IPursuitAI;
+class IPursuit;
+class IPlaceableScenery;
+class EAXCharacter;
+struct IPlayer;
 
 namespace UMath {
 
@@ -15,37 +21,145 @@ namespace UMath {
 
 }
 
+namespace Sim {
+
+    class IEntity;
+
+    namespace Collision {
+
+        struct Info {
+            enum CollisionType {
+                NONE   = 0,
+                OBJECT = 1,
+                WORLD  = 2,
+                GROUND = 3,
+            };
+
+            UMath::Vector3 position;
+            const void*    objAsurface;
+            UMath::Vector3 normal;
+            int            type : 3;
+            int            objAImmobile : 1;
+            int            objADetached : 1;
+            int            objBImmobile : 1;
+            int            objBDetached : 1;
+            int            sliding : 1;
+            int            unused : 24;
+            UMath::Vector3 closingVel;
+            float          force;
+            UMath::Vector3 armA;
+            HSIMABLE       objA;
+            UMath::Vector3 armB;
+            HSIMABLE       objB;
+        };
+
+        class IListener {
+          public:
+            void OnCollision(const Info& cinfo);
+
+            void OnCollisionHook(const Info& cinfo);
+        };
+
+    }
+
+}
+
+class ISimable {
+  public:
+    static ISimable* FindInstance(HSIMABLE handle);
+
+    virtual ~ISimable();
+    virtual int GetSimableType() const;
+    virtual void Kill();
+    virtual bool Attach(void* object);
+    virtual bool Detach(void* object);
+    virtual const void* GetAttachments() const;
+    virtual void AttachEntity(Sim::IEntity* e);
+    virtual void DetachEntity();
+    virtual IPlayer* GetPlayer() const;
+    virtual bool IsPlayer() const;
+};
+
+class IRoadBlock {
+  public:
+    virtual ~IRoadBlock();
+    virtual bool AddVehicle(IVehicle* vehicle) = 0;
+    virtual void AddSmackable(IPlaceableScenery* smackable, bool isSpikeStrip) = 0;
+    virtual bool RemoveVehicle(IVehicle* vehicle) = 0;
+    virtual void ReleaseAllSmackables() = 0;
+    virtual int GetNumCops() = 0;
+    virtual void SetPursuit(IPursuit* pursuit) = 0;
+    virtual IPursuit* GetPursuit() = 0;
+    virtual void SetDodged(bool dodged) = 0;
+    virtual bool GetDodged() = 0;
+    virtual short GetNumCopsDamaged() = 0;
+    virtual short GetNumCopsDestroyed() = 0;
+    virtual void IncNumCopsDamaged() = 0;
+    virtual void IncNumCopsDestroyed() = 0;
+    virtual const UMath::Vector3& GetRoadBlockCentre() = 0;
+    virtual const UMath::Vector3& GetRoadBlockDir() = 0;
+    virtual void SetRoadBlockCentre(const UMath::Vector3& centre, const UMath::Vector3& dir) = 0;
+    virtual float GetMinDistanceToTarget(float dT, float& distxz, IVehicle** minDistVehicle) = 0;
+    virtual short GetNumSpikeStrips() = 0;
+};
+
+enum SPCHType_1_EventID {
+    kSPCH1_EventID_CallForRB    = 76,
+    kSPCH1_EventID_RegainVisual = 107,
+    kSPCH1_EventID_LostSuspect  = 108,
+    kSPCH1_EventID_IntentToRam  = 113,
+    kSPCH1_EventID_VehicleReport = 155,
+    kSPCH1_EventID_HeliBailout   = 176,
+    kSPCH1_EventID_SpotterWanted = 216,
+    kSPCH1_EventID_InterruptRamHigh = 198,
+};
+
+enum SPCHType_EventRuleResult {
+    kSPCH_EventRuleResult_Ok = 0,
+};
+
+enum SpeechValRtnType {
+    kKeepEvt     = 0,
+    kIntEvt      = 1,
+    kDitchEvt    = 2,
+    kEvtNotFound = 3,
+    kDeferEvt    = 4,
+};
+
 class Timer {
   public:
     int PackedTime;
 };
 
-enum SPCHType_1_EventID {
-    kSPCH1_EventID_CallForBU         = 67,
-    kSPCH1_EventID_CallForRB         = 76,
-    kSPCH1_EventID_DispRBUpdate      = 78,
-    kSPCH1_EventID_StrategyReset     = 94,
-    kSPCH1_EventID_DispPursuitUpdate = 99,
-    kSPCH1_EventID_PursuitUpdateRep  = 100,
-    kSPCH1_EventID_Unit911Reply      = 103,
-    kSPCH1_EventID_RegainVisual      = 107,
-    kSPCH1_EventID_LostSuspect       = 108,
-    kSPCH1_EventID_IntentToRam       = 113,
-    kSPCH1_EventID_SuspectBehaviour  = 116,
-    kSPCH1_EventID_DriverHistory     = 118,
-    kSPCH1_EventID_VehicleReport     = 155,
-    kSPCH1_EventID_InitialCallForBU  = 161,
-    kSPCH1_EventID_HeliBailout       = 176,
-    kSPCH1_EventID_HeliSwarming      = 177,
-    kSPCH1_EventID_HeliHazardAlert   = 179,
-    kSPCH1_EventID_DispPursEscGen    = 181,
-    kSPCH1_EventID_DispBackupReply   = 184,
-    kSPCH1_EventID_Spotted           = 214,
-    kSPCH1_EventID_WeatherReport     = 219,
-    kSPCH1_EventID_DispBUETA         = 228,
+class GameplaySettings {
+  public:
+    bool          AutoSaveOn;
+    bool          RearviewOn;
+    bool          Damage;
+    unsigned char SpeedoUnits;
 };
 
+class UserProfile {
+  public:
+    unsigned char    mOptions[0x38];
+    GameplaySettings TheGameplaySettings;
+};
+
+class cFrontendDatabase {
+  public:
+    GameplaySettings* GetGameplaySettings() {
+        return &CurrentUserProfiles[0]->TheGameplaySettings;
+    }
+
+    unsigned char mFrontendDatabase[0x10];
+    UserProfile*  CurrentUserProfiles[2];
+};
+
+extern cFrontendDatabase*& FEDatabase;
+
 namespace Csis {
+
+    enum Result : int {};
 
     struct InterfaceId {
         const char* pString;
@@ -67,25 +181,18 @@ namespace Csis {
         Type_intensity_High   = 2,
     };
 
-    enum Type_heli_bailout_type {
-        Type_heli_bailout_type_flight_conditions = 1,
-        Type_heli_bailout_type_low_ammo          = 2,
-        Type_heli_bailout_type_fuel_low          = 4,
-        Type_heli_bailout_type_damage_sustained  = 8,
+    enum Type_heli_hazard_alert_type : int {};
+    enum Type_car_color : int {};
+    enum Type_car_type : int {};
+
+    enum Type_speed {
+        Type_speed_over_speed_limit = 1,
     };
 
-    enum Type_heli_hazard_alert_type {
-        Type_heli_hazard_alert_type_windy_roads         = 1,
-        Type_heli_hazard_alert_type_approaching_highway = 2,
-        Type_heli_hazard_alert_type_approaching_tunnel  = 4,
-        Type_heli_hazard_alert_type_approaching_city    = 8,
-        Type_heli_hazard_alert_type_approaching_airport = 16,
-        Type_heli_hazard_alert_type_approaching_blimp   = 32,
-    };
-
-    enum Type_yes_no {
-        Type_yes_no_Yes_True = 1,
-        Type_yes_no_No_False = 2,
+    enum Type_measurement {
+        Type_measurement_generic       = 1,
+        Type_measurement_imperial_only = 2,
+        Type_measurement_metric_only   = 4,
     };
 
     enum Type_roadblock_type {
@@ -93,20 +200,45 @@ namespace Csis {
         Type_roadblock_type_Spikes             = 2,
     };
 
-    enum Type_region {
-        Type_region_College_Town = 1,
-        Type_region_Coastal      = 2,
-        Type_region_City         = 4,
-        Type_region_Alpine       = 8,
+}
+
+namespace Attrib {
+namespace Gen {
+
+    class pvehicle {
+      public:
+        struct _LayoutStruct {
+            unsigned char       mBeforeVerbalType[0x40];
+            Csis::Type_car_type VerbalType;
+        };
+
+        bool IsValid() const {
+            return mLayoutPtr != nullptr;
+        }
+
+        Csis::Type_car_type VerbalType() const {
+            return static_cast<const _LayoutStruct*>(mLayoutPtr)->VerbalType;
+        }
+
+        void*          mOwner;
+        const void*    mCollection;
+        const void*    mLayoutPtr;
+        unsigned int   mMsgPort;
+        unsigned short mFlags;
+        unsigned short mLocks;
     };
 
-    enum Type_num_suspects {
-        Type_num_suspects_one_suspect       = 1,
-        Type_num_suspects_multiple_suspects = 2,
-    };
+}
+}
 
-    enum Type_disp_backup_type {
-        Type_disp_backup_type_Air_Support = 8,
+namespace Csis {
+
+    struct Setup_VehicleReportStruct {
+        int              speaker_id;
+        Type_car_color   car_color;
+        Type_car_type    car_type;
+        Type_speed       speed;
+        Type_measurement measurement;
     };
 
     struct AnytimeEvents_IntentToRamStruct {
@@ -124,137 +256,19 @@ namespace Csis {
         Type_intensity intensity;
     };
 
-    struct HeliSpecific_HeliBailoutStruct {
-        int                    speaker_id;
-        Type_heli_bailout_type heli_bailout_type;
-    };
-
-    struct AnytimeEvents_Unit911ReplyStruct {
-        int speaker_id;
-    };
-
-    struct StaticRoadblock_DispRBUpdateStruct {
+    struct StaticRoadblock_CallForRBStruct {
         int                 speaker_id;
         Type_code           code;
-        Type_yes_no         yes_no;
         Type_roadblock_type roadblock_type;
     };
 
-    struct AnytimeEvents_DriverHistoryStruct {
-        int         speaker_id;
-        Type_region region;
-    };
-
-    struct AnytimeEvents_SuspectBehaviourStruct {
-        int               speaker_id;
-        Type_num_suspects num_suspects;
-    };
-
-    struct AnytimeEvents_DispPursEscGenStruct {
-        int               speaker_id;
-        Type_num_suspects num_suspects;
-    };
-
-    struct AnytimeEvents_WeatherReportStruct {
-        int speaker_id;
-    };
-
 }
-
-namespace Attrib {
-
-    class Collection;
-
-    class Instance {
-      public:
-        const void* GetAttributePointer(unsigned int attribkey, unsigned int index) const;
-
-        void*             mOwner;
-        const Collection* mCollection;
-        void*             mLayoutPtr;
-        unsigned int      mMsgPort;
-        unsigned short    mFlags;
-        unsigned short    mLocks;
-    };
-
-    const Collection* FindCollection(unsigned int classkey, unsigned int collectionkey);
-
-}
-
-namespace UTL {
-namespace COM {
-
-    class Object;
-
-    class IUnknown {
-      public:
-        template <typename T> bool QueryInterface(T** out) {
-            *out = static_cast<T*>(FindInterface(T::_IHandle()));
-            return *out != nullptr;
-        }
-
-      protected:
-        virtual ~IUnknown() {}
-
-      private:
-        IUnknown* FindInterface(void* handle);
-
-        Object* _mCOMObject;
-    };
-
-}
-}
-
-class ISimable : public UTL::COM::IUnknown {
-  public:
-    static ISimable* FindInstance(HSIMABLE handle);
-};
-
-class IAIHelicopter : public UTL::COM::IUnknown {
-  public:
-    static void* _IHandle();
-
-    virtual float GetDesiredHeightOverDest() const = 0;
-    virtual void SetDesiredHeightOverDest(const float height) = 0;
-    virtual void SetLookAtPosition(UMath::Vector3 la) = 0;
-    virtual UMath::Vector3 GetLookAtPosition() const = 0;
-    virtual void SetDestinationVelocity(const UMath::Vector3& v) = 0;
-    virtual void SteerToNav(WRoadNav* road_nav, float height, float speed, bool bStopAtDest) = 0;
-    virtual bool StartPathToPoint(UMath::Vector3& point) = 0;
-    virtual bool StrafeToDestIsSet() const = 0;
-    virtual void SetStrafeToDest(bool strafe) = 0;
-    virtual bool FilterHeliAltitude(UMath::Vector3& point) = 0;
-    virtual void RestrictPointToRoadNet(UMath::Vector3& seekPosition) = 0;
-    virtual void SetFuelFull() = 0;
-    virtual float GetFuelTimeRemaining() = 0;
-};
-
-class EAXCharacter;
-class EAXCop;
-
-class MReqBackup {
-  public:
-    int GetBackupType() const {
-        return fBackupType;
-    }
-
-    unsigned char mMessage[0x10];
-    int           fBackupType;
-};
 
 namespace Speech {
 
     enum SpeakerID {
-        Dispatch       = 1,
-        Heli           = 2,
-        Primary1       = 3,
-        Primary2       = 4,
-        Primary3       = 5,
-        Secondary1     = 6,
-        Secondary2     = 7,
-        Secondary3     = 8,
-        Cross          = 9,
-        NUM_SPEAKER_ID = 10,
+        Dispatch = 1,
+        Heli     = 2,
     };
 
     struct Battalion {
@@ -262,7 +276,12 @@ namespace Speech {
         int number;
     };
 
+    struct SPCHType_SampleRequestData;
+    struct SpeechSampleData;
+
     struct ScheduledSpeechEvent {
+        void* GetData(unsigned int* datasize);
+
         Csis::InterfaceId*    iid;
         Csis::FunctionHandle* fh;
         SPCHType_1_EventID    ID;
@@ -270,11 +289,11 @@ namespace Speech {
         Timer                 entry_time;
         Timer                 playback_time;
         Timer                 finish_time;
-        void*                 assoc_samples[7];
-        uint8_t               assoc_samples_count;
-        uint8_t               assoc_samples_prep;
-        uint8_t               curndx;
-        uint8_t               priority;
+        SpeechSampleData*     assoc_samples[7];
+        unsigned char         assoc_samples_count;
+        unsigned char         assoc_samples_prep;
+        unsigned char         curndx;
+        unsigned char         priority;
         short                 frameindex;
         short                 flags;
     };
@@ -287,42 +306,60 @@ namespace Speech {
 
     struct EventHistory {
         History* Find(SPCHType_1_EventID id);
+        int      GetCount(SPCHType_1_EventID id);
+    };
+
+    class Module {
+      public:
+        virtual ~Module();
+        virtual void Init(int channel) = 0;
+        virtual void LoadBanks() = 0;
+        virtual int TestSentenceRuleCallback(int eventID, int ruleID, int parmValue) = 0;
+        virtual int SetSentenceRuleCallback(int eventID, int ruleID, int parmValue) = 0;
+        virtual SPCHType_EventRuleResult EventRuleCallback(int eventID) = 0;
+        virtual int GetNumBanks() = 0;
+        virtual unsigned int GetBankOffset(int bnum) = 0;
+        virtual void Update() = 0;
+        virtual const char* GetFilename() = 0;
+        virtual bool QueStream(int stream_type, void (*callback)(), bool trigger_play_after_callback) = 0;
+        virtual unsigned int SampleRequestCallback(SPCHType_SampleRequestData* data) = 0;
+        virtual bool IsStreamQueued() = 0;
+        virtual char* GetCSIptr() = 0;
+        virtual int GetChannel() = 0;
+        virtual char* GetEventDat() = 0;
+        virtual bool IsDataLoaded() = 0;
+        virtual bool PlayStream(int stream_id) = 0;
+        virtual void ReleaseResource() = 0;
     };
 
     struct Manager {
         static ScheduledSpeechEvent* ScheduleSpeechPartII(unsigned int size, void* data, Csis::InterfaceId& iid, Csis::FunctionHandle& fh,
                                                           EAXCharacter* actor);
-        static void NotifyEventCompletion(ScheduledSpeechEvent* evt, bool playback_complete);
-        static bool IsCopSpeechBusy();
         static bool IsQueued(SPCHType_1_EventID evtID, int indices);
         static bool IsCopSpeechPlaying(SPCHType_1_EventID event_id);
+        static Csis::Result IndirectSpeechEvent(ScheduledSpeechEvent* evt, bool test_only);
+        static SpeechValRtnType PostValidate(ScheduledSpeechEvent* evt, unsigned int mask);
+        static void ClearPlayback();
 
         static EventHistory& GetHistory() {
             return mGlobalHistory;
         }
 
-        static void NotifyEventCompletionHook(ScheduledSpeechEvent* evt, bool playback_complete);
+        static Csis::Result IndirectSpeechEventHook(ScheduledSpeechEvent* evt, bool test_only);
+        static SpeechValRtnType PostValidateHook(ScheduledSpeechEvent* evt, unsigned int mask);
 
         static EventHistory& mGlobalHistory;
+
+        static Module* (&m_SpeechModule)[2];
     };
 
-    class StrategyFlow {
+    class RoadblockFlow {
       public:
-        void MessageReqBackup(const MReqBackup& message);
-        void MessageReqBackupHook(const MReqBackup& message);
-    };
+        void Setup();
+        void SetupHook();
 
-    struct copPair {
-        HSIMABLE hsimable;
-        EAXCop*  cop;
-    };
-
-    class copMap {
-      public:
-        void*    mAllocator;
-        copPair* mBegin;
-        copPair* mEnd;
-        copPair* mCapacityEnd;
+        unsigned char mSpeechFlow[0x10];
+        Timer         mT_setup;
     };
 
 }
@@ -330,6 +367,7 @@ namespace Speech {
 class MiscSpeech {
   public:
     static int LostSuspect(int spkrID);
+
     static int LostSuspectHook(int spkrID);
 };
 
@@ -485,13 +523,7 @@ class EAXCop : public EAXCharacter {
     virtual void Impact_Suspect_Traffic(Csis::Type_intensity intensity);
 };
 
-class EAXDispatch : public EAXCharacter {
-  public:
-    void BackupReply(EAXCop* cop, int yes, int type);
-    void PursuitUpdate(EAXCop* cop);
-
-    void PursuitUpdateHook(EAXCop* cop);
-};
+class EAXDispatch : public EAXCharacter {};
 
 class EAXAirSupport : public EAXCop {
   public:
@@ -502,45 +534,86 @@ class EAXAirSupport : public EAXCop {
     virtual void Quadrant();
     virtual void QuadrantMoving();
 
+    void SetHandle(HSIMABLE handle) override;
     void Update() override;
+    void SetLOS(bool yes) override;
+    void IntentToRam() override;
     void Bailout() override;
-    Csis::Type_heli_bailout_type GetCauseOfBailout();
 
-    void UpdateHook();
     void SetHandleHook(HSIMABLE handle);
-    void IntentToRamHook();
-    void StrategyResetHook(bool new_strategy);
+    void UpdateHook();
     void BailoutHook();
-    void HazardAlertHook(Csis::Type_heli_hazard_alert_type type);
-    void RegainVisualHook();
-    void SpottedHook();
-    void SwarmingHook();
-    void PursuitUpdateReplyHook();
-    void SuspectBehaviorHook();
+    void KillShot();
+    void SetLOSHook(bool yes);
+    void IntentToRamHook();
+    void IntentToRamPullBack();
+    void RegainVisualAfterRespawn();
+    void VehicleReportOnFirstSighting();
+    void SpotterWantedDuringCooldown();
+    void SpotterWantedForEscapedCar();
+    void CallForRBAhead(IRoadBlock* roadblock);
 };
 
-class Rain {
+class AIActionHeliPursuit {
   public:
-    float GetRainIntensity() {
-        return intensity;
-    }
+    enum kPursuitMode {
+        kStraight_Line     = 0,
+        kSearch_Pattern    = 1,
+        kSkid_Hit_Approach = 2,
+        kSkid_Hit_Strike   = 3,
+    };
 
-    unsigned char mRain[0x28C];
-    float         intensity;
-};
+    void SkidHitPursuit();
+    void SkidHitPursuitHook();
 
-class SFXCTL_Pathfinder {
-  public:
-    static int& m_curinteractive;
+    unsigned char  mAIAction[0x4C];
+    IVehicleAI*    mIVehicleAI;
+    IVehicle*      mIVehicle;
+    IRigidBody*    mIRigidBody;
+    IAIHelicopter* mIAIHelicopter;
+    IPursuitAI*    mIPursuitAI;
+    float          mPursuitTime;
+    float          mSkidKnockTimer;
+    float          mPathTime;
+    bool           mBuildingPath;
+    float          mSearchPatternAngle;
+    UMath::Vector3 mSearchDestPoint;
+    IRigidBody*    mPlayerRigidBody;
+    UMath::Vector3 mPlayerPosition;
+    UMath::Vector3 mSkidHitOffset;
+    int            mCollisionAbort;
+    float          mPlayerSpeed;
+    kPursuitMode   mPursuitMode;
 };
 
 class SoundAI {
   public:
+    enum BailoutType {
+        kOutrunBail = 0,
+        kForcedBail = 1,
+    };
+
     enum PursuitState {
         kActive      = 0,
         kSearching   = 1,
         kInactive    = 2,
         kOtherTarget = 3,
+    };
+
+    enum MachineState {
+        kPursuitFlow  = 1,
+        kStrategyFlow = 2,
+        kLost         = 666,
+        kTerminal     = 999,
+    };
+
+    enum SoundAIFlags {
+        BUSTED = 1 << 7,
+    };
+
+    struct CarCustomizations {
+        Csis::Type_car_color color;
+        unsigned int         flags;
     };
 
     static SoundAI* Get();
@@ -551,38 +624,42 @@ class SoundAI {
         return mHeli;
     }
 
-    EAXDispatch* GetDispatch() {
-        return mDispatch;
-    }
-
-    PursuitState GetPursuitState() {
-        return mPursuitState;
-    }
-
-    const int GetHeat() {
-        return mPlayerHeat;
+    int GetNumActiveCopCars() {
+        return mNumActiveCopCars;
     }
 
     const float GetPlayerSpeed() {
         return mPlayerSpeed;
     }
 
-    const float GetPursuitDuration() {
-        return mPursuitDuration;
+    PursuitState GetPursuitState() {
+        return mPursuitState;
     }
 
-    EAXCop* GetRandomActiveCop(int type, bool reqLOS);
-    void    UpdateStateMachines();
-    EAXCop* FindClosestCop(bool enforceLOS, bool includeHeli);
-    void    AddNewHeli(IVehicle* heli);
+    const int GetFocus() {
+        return mFocus;
+    }
 
-    void UpdateStateMachinesHook();
+    const Attrib::Gen::pvehicle& GetPlayerSpecs() {
+        return mPVehicle;
+    }
+
+    unsigned int GetPlayerCarColor() {
+        return mPlayerCarCustom != nullptr ? mPlayerCarCustom->color : 0u;
+    }
+
+    IRoadBlock* GetRoadblock();
+    void TerminatePursuit(BailoutType type);
+    void ResetPursuit(bool including_music);
+    void AddNewHeli(IVehicle* heli);
+
+    void TerminatePursuitHook(BailoutType type);
+    void ResetPursuitHook(bool including_music);
     void AddNewHeliHook(IVehicle* heli);
 
     unsigned char  mActivity[0x54];
     unsigned int   mFlags;
-    Speech::copMap mActors;
-    unsigned char  mUsage[0x70];
+    unsigned char  mActorsAndUsage[0x80];
     EAXDispatch*   mDispatch;
     EAXCop*        mLeader;
     EAXAirSupport* mHeli;
@@ -592,14 +669,14 @@ class SoundAI {
     EAXCop*        mLatestCop;
     int            mPlayerHeat;
     float          mPlayerSpeed;
-    UMath::Vector3 mPlayerPos;
-    UMath::Vector3 mPlayerFW;
-    UMath::Vector3 mSmoothedFWRoad;
-    void*          mPursuit;
-    void*          mAIPursuit;
+    unsigned char  mPlayerDetails[0x2C];
     int            mFocus;
-    float          mPursuitDist;
-    float          mPursuitDuration;
-    unsigned char  mPursuitDetails[0x90];
+    unsigned char  mPursuitDetails[0x2C];
+    Attrib::Gen::pvehicle mPVehicle;
+    unsigned char  mTuneAndFlows[0x58];
     PursuitState   mPursuitState;
+    unsigned char  mPursuitTimers[0x18];
+    int            mNumActiveCopCars;
+    unsigned char  mCopsInViewAndTimers[0x3C];
+    CarCustomizations* mPlayerCarCustom;
 };
