@@ -211,6 +211,14 @@ namespace {
     constexpr uintptr_t kgHeliVehicle                       = 0x0090D61Cu;
     constexpr unsigned  kHeliFuelTimeRemaining              = 0x7D8u;
     constexpr float     kHeliLowFuelTime                    = 8.0f;
+    constexpr uintptr_t kEAXCop_CallForBackup               = 0x00718640u;
+    constexpr uintptr_t kEAXCop_BackupReminder              = 0x00718690u;
+    constexpr uintptr_t kEAXCop_BackupArrives               = 0x007186E0u;
+    constexpr uintptr_t kEAXDispatch_BackupReply            = 0x00717090u;
+    constexpr uint8_t   kBackupReplyEntry[5]                = { 0xA1, 0xC8, 0x3C, 0x99, 0x00 };
+    constexpr uintptr_t kEAXCopVTable                       = 0x008B1FA0u;
+    constexpr unsigned  kCallForBackupSlot                  = 0x98u;
+    constexpr unsigned  kBackupReminderSlot                 = 0xF0u;
     constexpr uintptr_t kObserverAssessWeatherRain          = 0x0071A6DFu;
     constexpr uint8_t   kAssessWeatherCode[46]              = { 0xA1, 0xB8, 0x96, 0x91, 0x00, 0x85, 0xC0, 0x75, 0x08, 0xD9, 0x05, 0x68,
                                                                 0x09, 0x89, 0x00, 0xEB, 0x06, 0xD9, 0x80, 0x8C, 0x02, 0x00, 0x00, 0xD8,
@@ -312,6 +320,8 @@ namespace {
     static_assert(offsetof(SoundAI, mPlayerSpeed) == 0x108, "SoundAI::mPlayerSpeed");
     static_assert(offsetof(SoundAI, mPursuitState) == 0x1D4, "SoundAI::mPursuitState");
     static_assert(offsetof(SoundAI, mFlags) == 0x54, "SoundAI::mFlags");
+    static_assert(offsetof(SoundAI, mActors) + offsetof(Speech::copMap, mBegin) == 0x5C, "SoundAI::mActors begin");
+    static_assert(sizeof(Csis::Backup_CallForBUStruct) == 0x0C, "Csis::Backup_CallForBUStruct is 0x0C bytes");
     static_assert(offsetof(SoundAI, mFocus) == 0x138, "SoundAI::mFocus");
     static_assert(offsetof(SoundAI, mLOSCount) == 0x148, "SoundAI::mLOSCount");
     static_assert(offsetof(SoundAI, mPVehicle) == 0x168, "SoundAI::mPVehicle");
@@ -349,6 +359,21 @@ namespace {
     bool                 gPilotReacquired       = false;
     bool                 gHeliDestroyed         = false;
     float                gHeliFuelTimeRemaining = -1.0f;
+
+    enum AirSupportRequest {
+        kNoAirSupportRequest,
+        kAirSupportWanted,
+        kAirSupportRequested,
+        kAirSupportHeard,
+    };
+
+    AirSupportRequest    gAirSupportRequest     = kNoAirSupportRequest;
+    int                  gAirSupportCallCount   = 0;
+    bool                 gAirSupportReminded    = false;
+    bool                 gAirSupportReminderReply = false;
+    bool                 gAirSupportArriving    = false;
+    bool                 gFastAirOn             = false;
+    uintptr_t            gBackupReplyOriginal   = kEAXDispatch_BackupReply;
     bool                 gWeatherOn             = false;
     bool                 gWeatherReportOn       = false;
     bool                 gWeatherReported       = false;
@@ -415,6 +440,22 @@ IRoadBlock* SoundAI::GetRoadblock() {
 
 void EAXCop::VehicleReport() {
     Game::ThisCall<void>(kEAXCop_VehicleReport, this);
+}
+
+void EAXCop::CallForBackup(int type) {
+    Game::ThisCall<void>(kEAXCop_CallForBackup, this, type);
+}
+
+void EAXCop::BackupReminder(int type) {
+    Game::ThisCall<void>(kEAXCop_BackupReminder, this, type);
+}
+
+void EAXCop::BackupArrives() {
+    Game::ThisCall<void>(kEAXCop_BackupArrives, this);
+}
+
+void EAXDispatch::BackupReply(EAXCop* cop, int yes, int type) {
+    Game::ThisCall<void>(gBackupReplyOriginal, this, cop, yes, type);
 }
 
 void EAXCop::WeatherReport() {
@@ -568,9 +609,50 @@ namespace {
         if (heli != 0 && Memory::Read(heli + kHeliFuelTimeRemaining, &fuel, sizeof(fuel)) && fuel == fuel) gHeliFuelTimeRemaining = fuel;
     }
 
+    bool IsHeliUp(SoundAI* copspeech) {
+        EAXAirSupport* heli = copspeech->GetHeli();
+        return heli != nullptr && !heli->IsDead() && heli->IsActive();
+    }
+
+    bool CanCallForAirSupport(EAXCop* cop) {
+        const int speaker = cop->GetSpeakerID();
+        return (speaker == Speech::Primary1 || speaker == Speech::Primary2 || speaker == Speech::Primary3 || speaker == Speech::Cross) && cop->IsActive()
+            && !cop->IsDead() && cop->HasLOS();
+    }
+
+    EAXCop* FindAirSupportCaller(SoundAI* copspeech) {
+        EAXCop* closest = nullptr;
+        const Speech::copMap& actors = copspeech->GetActors();
+        for (const Speech::copPair* actor = actors.mBegin; actor != nullptr && actor != actors.mEnd; ++actor) {
+            if (actor->cop == nullptr || !CanCallForAirSupport(actor->cop)) continue;
+            if (closest == nullptr || actor->cop->GetDistance() < closest->GetDistance()) closest = actor->cop;
+        }
+        return closest;
+    }
+
+    bool IsAirSupportCall(Speech::ScheduledSpeechEvent* evt) {
+        unsigned int size = 0;
+        const void* data = evt->GetData(&size);
+        return data != nullptr && size >= sizeof(Csis::Backup_CallForBUStruct)
+            && static_cast<const Csis::Backup_CallForBUStruct*>(data)->backup_type == Csis::Type_backup_type_Air_support;
+    }
+
+    void AirSupportLost() {
+        gAirSupportRequest = kAirSupportWanted;
+        gAirSupportReminded = false;
+        gAirSupportArriving = false;
+    }
+
+    void AirSupportArrived() {
+        gAirSupportArriving = gAirSupportRequest == kAirSupportRequested || gAirSupportRequest == kAirSupportHeard;
+        gAirSupportRequest = kNoAirSupportRequest;
+        gAirSupportReminded = false;
+    }
+
     void HelicopterArrived() {
         gHeliDestroyed = false;
         gHeliFuelTimeRemaining = -1.0f;
+        AirSupportArrived();
         if (gHelisThisPursuit++ > 0)
             gRespawnedHeliSpotting = true;
         else
@@ -715,6 +797,7 @@ void EAXAirSupport::CallForRBAhead(IRoadBlock* roadblock) {
 
 void EAXAirSupport::HeliDestroyed() {
     gHeliDestroyed = true;
+    AirSupportLost();
     if (Speech::Module* copSpeech = Speech::Manager::m_SpeechModule[COPSPEECH_MODULE]) copSpeech->ReleaseResource();
     Speech::Manager::ClearPlayback();
     if (Speech::History* history = Speech::Manager::GetHistory().Find(kSPCH1_EventID_HeliBailout)) history->count = 0;
@@ -767,6 +850,7 @@ void EAXAirSupport::BailoutOutOfFuel() {
 
 void EAXAirSupport::BailoutHook() {
     if (gHeliDestroyed) return;
+    AirSupportLost();
     if (gHeliFuelTimeRemaining >= 0.0f && gHeliFuelTimeRemaining < kHeliLowFuelTime && GetHealth() >= 1.0f) {
         BailoutOutOfFuel();
         return;
@@ -786,7 +870,12 @@ void EAXAirSupport::SetLOSHook(bool yes) {
     if (!spotted || !IsActive()) return;
     SoundAI* copspeech = SoundAI::Get();
     if (copspeech != nullptr && copspeech->GetFocus() == SoundAI::kLost) return;
-    if (gRespawnedHeliSpotting) {
+    if (gAirSupportArriving) {
+        gAirSupportArriving = false;
+        gRespawnedHeliSpotting = false;
+        gFirstHeliSpotting = false;
+        EAXCop::BackupArrives();
+    } else if (gRespawnedHeliSpotting) {
         gRespawnedHeliSpotting = false;
         RegainVisualAfterRespawn();
     } else if (gFirstHeliSpotting) {
@@ -802,6 +891,32 @@ void EAXCop::ReinitiatePursuitHook() {
         return;
     }
     ReinitiatePursuit();
+}
+
+bool EAXCop::RemindAboutAirSupport(int type) {
+    SoundAI* copspeech = SoundAI::Get();
+    if (type == Speech::kAirSupportBackup || gAirSupportRequest != kAirSupportHeard || gAirSupportReminded || copspeech == nullptr || IsHeliUp(copspeech))
+        return false;
+    gAirSupportReminded = true;
+    gAirSupportReminderReply = true;
+    EAXCop::BackupReminder(Speech::kAirSupportBackup);
+    return true;
+}
+
+void EAXCop::CallForBackupHook(int type) {
+    if (!RemindAboutAirSupport(type)) EAXCop::CallForBackup(type);
+}
+
+void EAXCop::BackupReminderHook(int type) {
+    if (!RemindAboutAirSupport(type)) EAXCop::BackupReminder(type);
+}
+
+void EAXDispatch::BackupReplyHook(EAXCop* cop, int yes, int type) {
+    if (gAirSupportReminderReply) {
+        gAirSupportReminderReply = false;
+        type = Speech::kAirSupportBackup;
+    }
+    BackupReply(cop, yes, type);
 }
 
 void AIActionHeliPursuit::SkidHitPursuitHook() {
@@ -846,6 +961,10 @@ SpeechValRtnType Speech::Manager::PostValidateHook(ScheduledSpeechEvent* evt, un
             mask &= ~(kDepFollowCheck | kOnScreenOnlyCheck);
         else if (evt->ID == kSPCH1_EventID_SpotterWanted)
             mask &= ~(kIntervalCheck | kCullingRangeCheck | kPlayerSpeedCheck);
+        else if (evt->ID == kSPCH1_EventID_BUArrives)
+            mask &= ~kCullingRangeCheck;
+    } else if (evt != nullptr && evt->ID == kSPCH1_EventID_CallForBU && IsAirSupportCall(evt)) {
+        mask &= ~kDepFollowCheck;
     }
     return PostValidate(evt, mask);
 }
@@ -880,6 +999,9 @@ void SoundAI::ResetPursuitHook(bool including_music) {
     gHeliDestroyed = false;
     gPilotReacquired = false;
     gWeatherReported = false;
+    gAirSupportRequest = kNoAirSupportRequest;
+    gAirSupportReminded = false;
+    gAirSupportArriving = false;
 }
 
 void SoundAI::AddNewHeliHook(IVehicle* heli) {
@@ -891,10 +1013,32 @@ void SoundAI::SyncPursuitHook() {
     if (gWeatherOn && mObserver != nullptr) mObserver->AssessWeather();
     const int focus = GetFocus();
     SyncPursuit();
+    if (gFastAirOn) RequestAirSupport();
     if (!gSpotterWantedOn || focus != kLost || GetFocus() != kPursuitFlow) return;
     EAXAirSupport* heli = HeliWithOnlyLOS();
     gPilotReacquired = heli != nullptr;
     if (heli != nullptr) heli->SpotterWantedOnReacquire();
+}
+
+void SoundAI::RequestAirSupport() {
+    gAirSupportReminderReply = false;
+    const int calls = Speech::Manager::GetHistory().GetCount(kSPCH1_EventID_CallForBU);
+    if (gAirSupportRequest == kAirSupportRequested) {
+        if (calls > gAirSupportCallCount)
+            gAirSupportRequest = kAirSupportHeard;
+        else if (!IsQueuedOrPlaying(kSPCH1_EventID_CallForBU))
+            gAirSupportRequest = kAirSupportWanted;
+        return;
+    }
+    if (gAirSupportRequest != kAirSupportWanted || IsHeliUp(this) || GetPursuitState() != kActive || GetFocus() == kLost || mDispatch == nullptr
+        || IsQueuedOrPlaying(kSPCH1_EventID_CallForBU))
+        return;
+    EAXCop* caller = FindAirSupportCaller(this);
+    if (caller == nullptr) return;
+    gAirSupportCallCount = calls;
+    gAirSupportRequest = kAirSupportRequested;
+    caller->EAXCop::CallForBackup(Speech::kAirSupportBackup);
+    mDispatch->BackupReply(caller, 1, Speech::kAirSupportBackup);
 }
 
 void SoundAI::TerminatePursuitHook(BailoutType type) {
@@ -947,6 +1091,11 @@ bool SoundAI::Init(void*) {
                             && Patch::RedirectCall(kTerminatePursuitLostSuspectCall, kMiscSpeech_LostSuspect, reinterpret_cast<const void*>(&MiscSpeech::LostSuspectHook))
                             && Patch::Detour(kSoundAI_TerminatePursuit, kTerminatePursuitEntry, sizeof(kTerminatePursuitEntry),
                                              Game::MethodAddress(&SoundAI::TerminatePursuitHook), gTerminatePursuitOriginal);
+    gFastAirOn = syncPursuit
+              && Patch::Detour(kEAXDispatch_BackupReply, kBackupReplyEntry, sizeof(kBackupReplyEntry), Game::MethodAddress(&EAXDispatch::BackupReplyHook),
+                               gBackupReplyOriginal)
+              && Patch::ReplaceVirtual(kEAXCopVTable, kCallForBackupSlot, kEAXCop_CallForBackup, Game::MethodAddress(&EAXCop::CallForBackupHook))
+              && Patch::ReplaceVirtual(kEAXCopVTable, kBackupReminderSlot, kEAXCop_BackupReminder, Game::MethodAddress(&EAXCop::BackupReminderHook));
     const bool noDropoff = Patch::RedirectCall(kUpdateCalcProbPlaybackCall, kManager_CalcProbPlayback,
                                                reinterpret_cast<const void*>(&Speech::Manager::CalcProbPlaybackHook));
     return intentToRam || pullBack || respawnSpot || vehicleReport || reacquire || beenHit || heliDestroyed || roadblockAhead || searchPattern || noDropoff;

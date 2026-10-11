@@ -104,7 +104,10 @@ class IRoadBlock {
 };
 
 enum SPCHType_1_EventID {
+    kSPCH1_EventID_CallForBU    = 67,
+    kSPCH1_EventID_BUReminder   = 73,
     kSPCH1_EventID_CallForRB    = 76,
+    kSPCH1_EventID_BUArrives    = 150,
     kSPCH1_EventID_RegainVisual = 107,
     kSPCH1_EventID_LostSuspect  = 108,
     kSPCH1_EventID_IntentToRam  = 113,
@@ -208,6 +211,10 @@ namespace Csis {
         Type_heli_bailout_type_damage_sustained  = 8,
     };
 
+    enum Type_backup_type {
+        Type_backup_type_Air_support = 2,
+    };
+
 }
 
 namespace Attrib {
@@ -275,13 +282,41 @@ namespace Csis {
         Type_roadblock_type roadblock_type;
     };
 
+    struct Backup_CallForBUStruct {
+        int              speaker_id;
+        Type_code        code;
+        Type_backup_type backup_type;
+    };
+
 }
+
+class EAXCop;
 
 namespace Speech {
 
     enum SpeakerID {
         Dispatch = 1,
         Heli     = 2,
+        Primary1 = 3,
+        Primary2 = 4,
+        Primary3 = 5,
+        Cross    = 9,
+    };
+
+    enum BackupType {
+        kAirSupportBackup = 8,
+    };
+
+    struct copPair {
+        HSIMABLE hsimable;
+        EAXCop*  cop;
+    };
+
+    struct copMap {
+        void*    mAllocator;
+        copPair* mBegin;
+        copPair* mEnd;
+        copPair* mCapacity;
     };
 
     struct Battalion {
@@ -553,9 +588,17 @@ class EAXCop : public EAXCharacter {
     virtual void Impact_Suspect_Traffic(Csis::Type_intensity intensity);
 
     void ReinitiatePursuitHook();
+    void CallForBackupHook(int type);
+    void BackupReminderHook(int type);
+    bool RemindAboutAirSupport(int type);
 };
 
-class EAXDispatch : public EAXCharacter {};
+class EAXDispatch : public EAXCharacter {
+  public:
+    void BackupReply(EAXCop* cop, int yes, int type);
+
+    void BackupReplyHook(EAXCop* cop, int yes, int type);
+};
 
 class EAXAirSupport : public EAXCop {
   public:
@@ -663,6 +706,14 @@ class SoundAI {
         return mLeader;
     }
 
+    EAXDispatch* GetDispatch() {
+        return mDispatch;
+    }
+
+    const Speech::copMap& GetActors() {
+        return mActors;
+    }
+
     int GetNumActiveCopCars() {
         return mNumActiveCopCars;
     }
@@ -702,13 +753,15 @@ class SoundAI {
     void AddNewHeli(IVehicle* heli);
 
     void SyncPursuitHook();
+    void RequestAirSupport();
     void TerminatePursuitHook(BailoutType type);
     void ResetPursuitHook(bool including_music);
     void AddNewHeliHook(IVehicle* heli);
 
     unsigned char  mActivity[0x54];
     unsigned int   mFlags;
-    unsigned char  mActorsAndUsage[0x80];
+    Speech::copMap mActors;
+    unsigned char  mUsage[0x70];
     EAXDispatch*   mDispatch;
     EAXCop*        mLeader;
     EAXAirSupport* mHeli;
