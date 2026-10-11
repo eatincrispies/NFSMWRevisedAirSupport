@@ -107,9 +107,11 @@ enum SPCHType_1_EventID {
     kSPCH1_EventID_CallForBU    = 67,
     kSPCH1_EventID_BUReminder   = 73,
     kSPCH1_EventID_CallForRB    = 76,
+    kSPCH1_EventID_OutcomeFail  = 93,
     kSPCH1_EventID_Unit911Reply = 103,
     kSPCH1_EventID_DriverHistory = 118,
     kSPCH1_EventID_BUArrives    = 150,
+    kSPCH1_EventID_Interrupt    = 153,
     kSPCH1_EventID_RegainVisual = 107,
     kSPCH1_EventID_LostSuspect  = 108,
     kSPCH1_EventID_IntentToRam  = 113,
@@ -416,6 +418,7 @@ namespace Speech {
 
     class PursuitFlow;
     class StrategyFlow;
+    class MusicFlow;
 
     class Observer {
       public:
@@ -637,6 +640,7 @@ class EAXAirSupport : public EAXCop {
     void SetLOSHook(bool yes);
     void IntentToRamHook();
     void IntentToRamPullBack();
+    void AttackMissed();
     void RegainVisualAfterRespawn();
     void VehicleReportOnFirstSighting();
     void SpotterWantedOnReacquire();
@@ -772,6 +776,9 @@ class SoundAI {
     void SyncPursuitHook();
     void RequestAirSupport();
     void AnswerHistoryRequest();
+    void HoldOnWhenStopped();
+
+    float GetPlayerStopTime();
     void TerminatePursuitHook(BailoutType type);
     void ResetPursuitHook(bool including_music);
     void AddNewHeliHook(IVehicle* heli);
@@ -806,6 +813,10 @@ class SoundAI {
     Speech::PursuitFlow*  mPursuitFlow;
     Speech::StrategyFlow* mStrategyFlow;
     Speech::Observer*     mObserver;
-    unsigned char  mFlowsAndTimers[0x28];
+    Speech::RoadblockFlow* mRoadblockFlow;
+    Speech::MusicFlow*     mMusicFlow;
+    Timer          mT_outofFormation;
+    Timer          mT_reallylowspeed;
+    unsigned char  mTimers[0x18];
     CarCustomizations* mPlayerCarCustom;
 };

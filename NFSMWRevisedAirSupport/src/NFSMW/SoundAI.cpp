@@ -227,6 +227,11 @@ namespace {
     constexpr int       kFirstHistoryRequestTake            = 4;
     constexpr int       kLowestHeliHeat                     = 4;
     constexpr float     kPilotTakes911Chance                = 1.0f / 3.0f;
+    constexpr uintptr_t kEAXCharacter_InterruptComposedLow  = 0x00716FC0u;
+    constexpr uintptr_t kEAXCop_OutcomeFail                 = 0x00718CC0u;
+    constexpr uintptr_t kWorldTimer                         = 0x00925AE8u;
+    constexpr float     kSecondsPerTick                     = 0.00025f;
+    constexpr float     kMinTimeConsideredStopped           = 2.0f;
     constexpr uintptr_t kEAXCopVTable                       = 0x008B1FA0u;
     constexpr unsigned  kCallForBackupSlot                  = 0x98u;
     constexpr unsigned  kBackupReminderSlot                 = 0xF0u;
@@ -339,6 +344,7 @@ namespace {
     static_assert(offsetof(SoundAI, mPlayerCarCustom) == 0x230, "SoundAI::mPlayerCarCustom");
     static_assert(offsetof(SoundAI, mPursuitFlow) == 0x1FC, "SoundAI::mPursuitFlow");
     static_assert(offsetof(SoundAI, mObserver) == 0x204, "SoundAI::mObserver");
+    static_assert(offsetof(SoundAI, mT_reallylowspeed) == 0x214, "SoundAI::mT_reallylowspeed");
     static_assert(offsetof(Speech::Observer, mWeather) == 0x58, "Speech::Observer::mWeather");
     static_assert(offsetof(Attrib::Gen::pvehicle, mLayoutPtr) == 0x08, "Attrib::Gen::pvehicle::mLayoutPtr");
     static_assert(offsetof(Attrib::Gen::pvehicle::_LayoutStruct, VerbalType) == 0x40, "Attrib::Gen::pvehicle::VerbalType");
@@ -387,6 +393,9 @@ namespace {
     bool                 gReacquireOn           = false;
     bool                 gRaining               = false;
     bool                 gAnswer911On           = false;
+    bool                 gHoldOnOn              = false;
+    bool                 gHoldOnSaid            = false;
+    bool                 gRamLinesOn            = false;
     bool                 gHistoryRequestTaken   = false;
     bool                 gHistoryRequestHeard   = false;
 
@@ -403,6 +412,8 @@ namespace {
         bool RoadblockCall   = true;
         bool WeatherReport   = true;
         bool Answer911       = true;
+        bool HoldOn          = true;
+        bool AttackMissed    = true;
         bool RainFlag        = true;
         bool FastAirRequest  = true;
         bool FastAirReminder = true;
@@ -430,6 +441,8 @@ namespace {
         { "Pilot", "RoadblockCall",   &gSettings.RoadblockCall },
         { "Pilot", "WeatherReport",   &gSettings.WeatherReport },
         { "Pilot", "Answer911",       &gSettings.Answer911 },
+        { "Pilot", "HoldOn",          &gSettings.HoldOn },
+        { "Pilot", "AttackMissed",    &gSettings.AttackMissed },
         { "Radio", "RainFlag",        &gSettings.RainFlag },
         { "Radio", "FastAirRequest",  &gSettings.FastAirRequest },
         { "Radio", "FastAirReminder", &gSettings.FastAirReminder },
@@ -608,6 +621,18 @@ ISimable* ISimable::FindInstance(HSIMABLE handle) {
 
 void Sim::Collision::IListener::OnCollision(const Info& cinfo) {
     Game::ThisCall<void>(gSoundAIOnCollisionOriginal, this, &cinfo);
+}
+
+void EAXCop::OutcomeFail(short intensity) {
+    Game::ThisCall<void>(kEAXCop_OutcomeFail, this, intensity);
+}
+
+void EAXCharacter::InterruptComposedLow() {
+    Game::ThisCall<void>(kEAXCharacter_InterruptComposedLow, this);
+}
+
+float SoundAI::GetPlayerStopTime() {
+    return static_cast<float>(Game::Global<int>(kWorldTimer) - mT_reallylowspeed.PackedTime) * kSecondsPerTick;
 }
 
 void EAXCharacter::InterruptViolent() {
@@ -883,6 +908,11 @@ void EAXAirSupport::IntentToRamHook() {
         EAXCop::IntentToRam();
 }
 
+void EAXAirSupport::AttackMissed() {
+    if (IsQueuedOrPlaying(kSPCH1_EventID_OutcomeFail)) return;
+    EAXCop::OutcomeFail(static_cast<short>(Csis::Type_intensity_Normal));
+}
+
 void EAXAirSupport::IntentToRamPullBack() {
     if (TagUnusedTakes(kPullBackTakes)) ScheduleIntentToRam(this, kUnusedFlag);
 }
@@ -1045,9 +1075,14 @@ void EAXDispatch::BackupReplyHook(EAXCop* cop, int yes, int type) {
 void AIActionHeliPursuit::SkidHitPursuitHook() {
     const kPursuitMode before = mPursuitMode;
     SkidHitPursuit();
-    if (before != kSkid_Hit_Approach || mPursuitMode != kStraight_Line) return;
+    if (mPursuitMode != kStraight_Line) return;
     SoundAI* copspeech = SoundAI::Get();
-    if (copspeech != nullptr && copspeech->GetHeli() != nullptr) copspeech->GetHeli()->IntentToRamPullBack();
+    EAXAirSupport* heli = copspeech != nullptr ? copspeech->GetHeli() : nullptr;
+    if (heli == nullptr || heli->IsDead()) return;
+    if (before == kSkid_Hit_Approach && gRamLinesOn)
+        heli->IntentToRamPullBack();
+    else if (before == kSkid_Hit_Strike && gSettings.AttackMissed)
+        heli->AttackMissed();
 }
 
 void Sim::Collision::IListener::OnCollisionHook(const Info& cinfo) {
@@ -1084,9 +1119,11 @@ SpeechValRtnType Speech::Manager::PostValidateHook(ScheduledSpeechEvent* evt, un
             return kDitchEvt;
         if (evt->ID == kSPCH1_EventID_CallForRB)
             mask &= ~(kDepFollowCheck | kOnScreenOnlyCheck);
+        else if (evt->ID == kSPCH1_EventID_OutcomeFail)
+            mask &= ~kDepFollowCheck;
         else if (evt->ID == kSPCH1_EventID_SpotterWanted)
             mask &= ~(kIntervalCheck | kCullingRangeCheck | kPlayerSpeedCheck);
-        else if (evt->ID == kSPCH1_EventID_BUArrives)
+        else if (evt->ID == kSPCH1_EventID_BUArrives || evt->ID == kSPCH1_EventID_Interrupt)
             mask &= ~kCullingRangeCheck;
     } else if (evt != nullptr && evt->ID == kSPCH1_EventID_CallForBU && IsAirSupportCall(evt)) {
         mask &= ~kDepFollowCheck;
@@ -1143,6 +1180,7 @@ void SoundAI::SyncPursuitHook() {
     SyncPursuit();
     if (gFastAirOn) RequestAirSupport();
     if (gAnswer911On) AnswerHistoryRequest();
+    if (gHoldOnOn) HoldOnWhenStopped();
     if (!gReacquireOn || focus != kLost || GetFocus() != kPursuitFlow) return;
     EAXAirSupport* heli = HeliWithOnlyLOS();
     gPilotReacquired = heli != nullptr;
@@ -1189,6 +1227,18 @@ int SPCH::TakeLocationHook(const unsigned char* header, int take, int* offset, i
     return found;
 }
 
+void SoundAI::HoldOnWhenStopped() {
+    if (GetPlayerStopTime() < kMinTimeConsideredStopped) {
+        gHoldOnSaid = false;
+        return;
+    }
+    if (gHoldOnSaid || GetPursuitState() != kActive || NumCopsWithLOS() > 0) return;
+    EAXAirSupport* heli = GetHeli();
+    if (heli == nullptr || heli->IsDead() || !heli->IsActive() || !heli->HasLOS()) return;
+    gHoldOnSaid = true;
+    heli->EAXCharacter::InterruptComposedLow();
+}
+
 void SoundAI::AnswerHistoryRequest() {
     if (!gHistoryRequestTaken) return;
     if (Speech::Manager::IsCopSpeechPlaying(kSPCH1_EventID_Unit911Reply)) {
@@ -1213,7 +1263,8 @@ bool SoundAI::Init(void* module) {
     LoadSettings(module);
     const bool intentToRam = gSettings.RamLines && kAnytimeEvents_IntentToRam.Verify()
                           && Patch::ReplaceVirtual(kEAXAirSupportVTable, kIntentToRamSlot, kEAXCop_IntentToRam, Game::MethodAddress(&EAXAirSupport::IntentToRamHook));
-    const bool pullBack = intentToRam
+    gRamLinesOn = intentToRam;
+    const bool pullBack = (intentToRam || gSettings.AttackMissed)
                        && Patch::Detour(kAIActionHeliPursuit_SkidHitPursuit, kSkidHitPursuitEntry, sizeof(kSkidHitPursuitEntry),
                                         Game::MethodAddress(&AIActionHeliPursuit::SkidHitPursuitHook), gSkidHitPursuitOriginal);
     const bool respawnSpot = kAnytimeEvents_RegainVisual.Verify()
@@ -1253,6 +1304,7 @@ bool SoundAI::Init(void* module) {
                                gBackupReplyOriginal)
               && Patch::ReplaceVirtual(kEAXCopVTable, kCallForBackupSlot, kEAXCop_CallForBackup, Game::MethodAddress(&EAXCop::CallForBackupHook))
               && Patch::ReplaceVirtual(kEAXCopVTable, kBackupReminderSlot, kEAXCop_BackupReminder, Game::MethodAddress(&EAXCop::BackupReminderHook));
+    gHoldOnOn = gSettings.HoldOn && syncPursuit;
     gAnswer911On = gSettings.Answer911 && syncPursuit
                 && Patch::RedirectCall(kObserverUnit911ReplyCall, kMiscSpeech_Unit911Reply, reinterpret_cast<const void*>(&MiscSpeech::Unit911ReplyHook))
                 && Patch::RedirectCall(kStartTakeLocationCall, kSPCH_TakeLocation, reinterpret_cast<const void*>(&SPCH::TakeLocationHook));
