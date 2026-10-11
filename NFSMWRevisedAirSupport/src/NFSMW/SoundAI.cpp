@@ -713,7 +713,7 @@ void EAXAirSupport::CallForRBAhead(IRoadBlock* roadblock) {
     ScheduleSpeech(data, kStaticRoadblock_CallForRB, this);
 }
 
-void EAXAirSupport::KillShot() {
+void EAXAirSupport::HeliDestroyed() {
     gHeliDestroyed = true;
     if (Speech::Module* copSpeech = Speech::Manager::m_SpeechModule[COPSPEECH_MODULE]) copSpeech->ReleaseResource();
     Speech::Manager::ClearPlayback();
@@ -750,7 +750,7 @@ void EAXAirSupport::UpdateHook() {
     const bool wasDead = IsDead();
     EAXAirSupport::Update();
     if (IsDead()) {
-        if (!wasDead && !gHeliDestroyed) KillShot();
+        if (!wasDead && !gHeliDestroyed) HeliDestroyed();
         StandDown();
         return;
     }
@@ -938,9 +938,9 @@ bool SoundAI::Init(void*) {
     const bool reacquire = gSpotterWantedOn && syncPursuit
                         && Patch::RedirectVirtualCall(kPrimaryBranchReinitiatePursuitCall, kPrimaryBranchReinitiatePursuitCode,
                                                       sizeof(kPrimaryBranchReinitiatePursuitCode), Game::MethodAddress(&EAXCop::ReinitiatePursuitHook));
-    const bool killShot = kHeliSpecific_HeliBailout.Verify()
-                       && Patch::ReplaceVirtual(kEAXAirSupportVTable, kBailoutSlot, kEAXAirSupport_Bailout, Game::MethodAddress(&EAXAirSupport::BailoutHook))
-                       && Patch::ReplaceVirtual(kEAXAirSupportVTable, kUpdateSlot, kEAXAirSupport_Update, Game::MethodAddress(&EAXAirSupport::UpdateHook));
+    const bool heliDestroyed = kHeliSpecific_HeliBailout.Verify()
+                            && Patch::ReplaceVirtual(kEAXAirSupportVTable, kBailoutSlot, kEAXAirSupport_Bailout, Game::MethodAddress(&EAXAirSupport::BailoutHook))
+                            && Patch::ReplaceVirtual(kEAXAirSupportVTable, kUpdateSlot, kEAXAirSupport_Update, Game::MethodAddress(&EAXAirSupport::UpdateHook));
     const bool roadblockAhead = kStaticRoadblock_CallForRB.Verify() && postValidate
                              && Patch::RedirectCall(kRoadblockFlowServiceSetupCall, kRoadblockFlow_Setup, Game::MethodAddress(&Speech::RoadblockFlow::SetupHook));
     const bool searchPattern = kAnytimeEvents_LostSuspect.Verify()
@@ -949,7 +949,7 @@ bool SoundAI::Init(void*) {
                                              Game::MethodAddress(&SoundAI::TerminatePursuitHook), gTerminatePursuitOriginal);
     const bool noDropoff = Patch::RedirectCall(kUpdateCalcProbPlaybackCall, kManager_CalcProbPlayback,
                                                reinterpret_cast<const void*>(&Speech::Manager::CalcProbPlaybackHook));
-    return intentToRam || pullBack || respawnSpot || vehicleReport || reacquire || beenHit || killShot || roadblockAhead || searchPattern || noDropoff;
+    return intentToRam || pullBack || respawnSpot || vehicleReport || reacquire || beenHit || heliDestroyed || roadblockAhead || searchPattern || noDropoff;
 }
 
 void SoundAI::Restore() {

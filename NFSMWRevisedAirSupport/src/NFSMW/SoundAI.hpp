@@ -575,7 +575,7 @@ class EAXAirSupport : public EAXCop {
     void SetHandleHook(HSIMABLE handle);
     void UpdateHook();
     void BailoutHook();
-    void KillShot();
+    void HeliDestroyed();
     void StandDown();
     void BailoutOutOfFuel();
     void SetLOSHook(bool yes);
