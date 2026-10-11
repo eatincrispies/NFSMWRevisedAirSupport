@@ -107,6 +107,8 @@ enum SPCHType_1_EventID {
     kSPCH1_EventID_CallForBU    = 67,
     kSPCH1_EventID_BUReminder   = 73,
     kSPCH1_EventID_CallForRB    = 76,
+    kSPCH1_EventID_Unit911Reply = 103,
+    kSPCH1_EventID_DriverHistory = 118,
     kSPCH1_EventID_BUArrives    = 150,
     kSPCH1_EventID_RegainVisual = 107,
     kSPCH1_EventID_LostSuspect  = 108,
@@ -432,9 +434,19 @@ namespace Speech {
 class MiscSpeech {
   public:
     static int LostSuspect(int spkrID);
+    static int Unit911Reply(int spkrID);
 
     static int LostSuspectHook(int spkrID);
+    static int Unit911ReplyHook(int spkrID);
 };
+
+namespace SPCH {
+
+    int TakeLocation(const unsigned char* header, int take, int* offset, int* size);
+
+    int TakeLocationHook(const unsigned char* header, int take, int* offset, int* size);
+
+}
 
 class EAXCharacter {
   public:
@@ -595,6 +607,7 @@ class EAXCop : public EAXCharacter {
 
 class EAXDispatch : public EAXCharacter {
   public:
+    void DriverHistory() override;
     void BackupReply(EAXCop* cop, int yes, int type);
 
     void BackupReplyHook(EAXCop* cop, int yes, int type);
@@ -710,6 +723,10 @@ class SoundAI {
         return mDispatch;
     }
 
+    int GetHeat() {
+        return mPlayerHeat;
+    }
+
     const Speech::copMap& GetActors() {
         return mActors;
     }
@@ -754,6 +771,7 @@ class SoundAI {
 
     void SyncPursuitHook();
     void RequestAirSupport();
+    void AnswerHistoryRequest();
     void TerminatePursuitHook(BailoutType type);
     void ResetPursuitHook(bool including_music);
     void AddNewHeliHook(IVehicle* heli);

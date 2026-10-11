@@ -2,6 +2,7 @@
 #include <windows.h>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include "SoundAI.hpp"
 
@@ -216,6 +217,16 @@ namespace {
     constexpr uintptr_t kEAXCop_BackupArrives               = 0x007186E0u;
     constexpr uintptr_t kEAXDispatch_BackupReply            = 0x00717090u;
     constexpr uint8_t   kBackupReplyEntry[5]                = { 0xA1, 0xC8, 0x3C, 0x99, 0x00 };
+    constexpr uintptr_t kMiscSpeech_Unit911Reply            = 0x0071DA00u;
+    constexpr uintptr_t kObserverUnit911ReplyCall           = 0x0071EC03u;
+    constexpr uintptr_t kEAXDispatch_DriverHistory          = 0x00717020u;
+    constexpr uintptr_t kSPCH_TakeLocation                  = 0x008349FAu;
+    constexpr uintptr_t kStartTakeLocationCall              = 0x00833EEBu;
+    constexpr uintptr_t kbRandom                            = 0x0045DA70u;
+    constexpr uint16_t  kUnit911ReplySample                 = 0xC4u;
+    constexpr int       kFirstHistoryRequestTake            = 4;
+    constexpr int       kLowestHeliHeat                     = 4;
+    constexpr float     kPilotTakes911Chance                = 1.0f / 3.0f;
     constexpr uintptr_t kEAXCopVTable                       = 0x008B1FA0u;
     constexpr unsigned  kCallForBackupSlot                  = 0x98u;
     constexpr unsigned  kBackupReminderSlot                 = 0xF0u;
@@ -368,12 +379,107 @@ namespace {
     };
 
     AirSupportRequest    gAirSupportRequest     = kNoAirSupportRequest;
-    int                  gAirSupportCallCount   = 0;
     bool                 gAirSupportReminded    = false;
     bool                 gAirSupportReminderReply = false;
     bool                 gAirSupportArriving    = false;
     bool                 gFastAirOn             = false;
     uintptr_t            gBackupReplyOriginal   = kEAXDispatch_BackupReply;
+    bool                 gReacquireOn           = false;
+    bool                 gRaining               = false;
+    bool                 gAnswer911On           = false;
+    bool                 gHistoryRequestTaken   = false;
+    bool                 gHistoryRequestHeard   = false;
+
+    struct Settings {
+        bool RamLines        = true;
+        bool SearchPattern   = true;
+        bool SpottedAgain    = true;
+        bool VehicleReport   = true;
+        bool EscapedCar      = true;
+        bool Reacquire       = true;
+        bool BeenHit         = true;
+        bool KillShot        = true;
+        bool DeadHeliSilence = true;
+        bool RoadblockCall   = true;
+        bool WeatherReport   = true;
+        bool Answer911       = true;
+        bool RainFlag        = true;
+        bool FastAirRequest  = true;
+        bool FastAirReminder = true;
+        bool NoSpeechDropoff = true;
+    };
+
+    Settings gSettings;
+
+    struct SettingKey {
+        const char* table;
+        const char* key;
+        bool*       value;
+    };
+
+    const SettingKey kSettingKeys[] = {
+        { "Pilot", "RamLines",        &gSettings.RamLines },
+        { "Pilot", "SearchPattern",   &gSettings.SearchPattern },
+        { "Pilot", "SpottedAgain",    &gSettings.SpottedAgain },
+        { "Pilot", "VehicleReport",   &gSettings.VehicleReport },
+        { "Pilot", "EscapedCar",      &gSettings.EscapedCar },
+        { "Pilot", "Reacquire",       &gSettings.Reacquire },
+        { "Pilot", "BeenHit",         &gSettings.BeenHit },
+        { "Pilot", "KillShot",        &gSettings.KillShot },
+        { "Pilot", "DeadHeliSilence", &gSettings.DeadHeliSilence },
+        { "Pilot", "RoadblockCall",   &gSettings.RoadblockCall },
+        { "Pilot", "WeatherReport",   &gSettings.WeatherReport },
+        { "Pilot", "Answer911",       &gSettings.Answer911 },
+        { "Radio", "RainFlag",        &gSettings.RainFlag },
+        { "Radio", "FastAirRequest",  &gSettings.FastAirRequest },
+        { "Radio", "FastAirReminder", &gSettings.FastAirReminder },
+        { "Radio", "NoSpeechDropoff", &gSettings.NoSpeechDropoff },
+    };
+
+    char* Trim(char* text) {
+        while (*text == ' ' || *text == '\t') ++text;
+        size_t length = std::strlen(text);
+        while (length > 0 && (text[length - 1] == ' ' || text[length - 1] == '\t' || text[length - 1] == '\r' || text[length - 1] == '\n'))
+            text[--length] = '\0';
+        return text;
+    }
+
+    void LoadSettings(void* module) {
+        char path[MAX_PATH] = "";
+        const DWORD length = GetModuleFileNameA(static_cast<HMODULE>(module), path, MAX_PATH);
+        if (length == 0 || length >= MAX_PATH) return;
+        char* extension = std::strrchr(path, '.');
+        if (extension == nullptr || static_cast<size_t>(extension - path) + sizeof(".toml") > MAX_PATH) return;
+        std::memcpy(extension, ".toml", sizeof(".toml"));
+
+        FILE* file = nullptr;
+        if (fopen_s(&file, path, "r") != 0 || file == nullptr) return;
+        char line[256];
+        char table[64] = "";
+        while (std::fgets(line, sizeof(line), file)) {
+            if (char* comment = std::strchr(line, '#')) *comment = '\0';
+            char* text = Trim(line);
+            if (static_cast<unsigned char>(text[0]) == 0xEF && static_cast<unsigned char>(text[1]) == 0xBB && static_cast<unsigned char>(text[2]) == 0xBF)
+                text = Trim(text + 3);
+            if (*text == '[') {
+                if (char* close = std::strchr(text, ']')) {
+                    *close = '\0';
+                    std::snprintf(table, sizeof(table), "%s", Trim(text + 1));
+                }
+                continue;
+            }
+            char* equals = std::strchr(text, '=');
+            if (equals == nullptr) continue;
+            *equals = '\0';
+            const char* key = Trim(text);
+            const char* value = Trim(equals + 1);
+            const bool on = std::strcmp(value, "true") == 0;
+            if (!on && std::strcmp(value, "false") != 0) continue;
+            for (const SettingKey& setting : kSettingKeys)
+                if (std::strcmp(setting.table, table) == 0 && std::strcmp(setting.key, key) == 0) *setting.value = on;
+        }
+        std::fclose(file);
+    }
     bool                 gWeatherOn             = false;
     bool                 gWeatherReportOn       = false;
     bool                 gWeatherReported       = false;
@@ -452,6 +558,22 @@ void EAXCop::BackupReminder(int type) {
 
 void EAXCop::BackupArrives() {
     Game::ThisCall<void>(kEAXCop_BackupArrives, this);
+}
+
+void EAXDispatch::DriverHistory() {
+    Game::ThisCall<void>(kEAXDispatch_DriverHistory, this);
+}
+
+int MiscSpeech::Unit911Reply(int spkrID) {
+    return Game::Call<int>(kMiscSpeech_Unit911Reply, spkrID);
+}
+
+int SPCH::TakeLocation(const unsigned char* header, int take, int* offset, int* size) {
+    return Game::Call<int>(kSPCH_TakeLocation, header, take, offset, size);
+}
+
+float bRandom(float range) {
+    return Game::Call<float>(kbRandom, range);
 }
 
 void EAXDispatch::BackupReply(EAXCop* cop, int yes, int type) {
@@ -638,6 +760,7 @@ namespace {
     }
 
     void AirSupportLost() {
+        if (gAirSupportRequest != kNoAirSupportRequest) return;
         gAirSupportRequest = kAirSupportWanted;
         gAirSupportReminded = false;
         gAirSupportArriving = false;
@@ -798,6 +921,7 @@ void EAXAirSupport::CallForRBAhead(IRoadBlock* roadblock) {
 void EAXAirSupport::HeliDestroyed() {
     gHeliDestroyed = true;
     AirSupportLost();
+    if (!gSettings.KillShot) return;
     if (Speech::Module* copSpeech = Speech::Manager::m_SpeechModule[COPSPEECH_MODULE]) copSpeech->ReleaseResource();
     Speech::Manager::ClearPlayback();
     if (Speech::History* history = Speech::Manager::GetHistory().Find(kSPCH1_EventID_HeliBailout)) history->count = 0;
@@ -810,9 +934,7 @@ void EAXAirSupport::StandDown() {
 }
 
 void EAXAirSupport::ReportWeather() {
-    SoundAI* copspeech = SoundAI::Get();
-    Speech::Observer* observer = copspeech != nullptr ? copspeech->GetObserver() : nullptr;
-    if (observer == nullptr || !observer->WeatherExists()) {
+    if (!gRaining) {
         gWeatherReported = false;
         return;
     }
@@ -824,9 +946,10 @@ void EAXAirSupport::ReportWeather() {
 void Speech::Observer::AssessWeather() {
     const float rain = GetRainIntensity();
     if (rain > kWeatherReportIntensity)
-        mWeather = true;
+        gRaining = true;
     else if (rain <= 0.0f)
-        mWeather = false;
+        gRaining = false;
+    if (gSettings.RainFlag) mWeather = gRaining;
 }
 
 void EAXAirSupport::UpdateHook() {
@@ -834,7 +957,7 @@ void EAXAirSupport::UpdateHook() {
     EAXAirSupport::Update();
     if (IsDead()) {
         if (!wasDead && !gHeliDestroyed) HeliDestroyed();
-        StandDown();
+        if (gSettings.DeadHeliSilence) StandDown();
         return;
     }
     if (wasDead) HelicopterArrived();
@@ -877,11 +1000,11 @@ void EAXAirSupport::SetLOSHook(bool yes) {
         EAXCop::BackupArrives();
     } else if (gRespawnedHeliSpotting) {
         gRespawnedHeliSpotting = false;
-        RegainVisualAfterRespawn();
+        if (gSettings.SpottedAgain) RegainVisualAfterRespawn();
     } else if (gFirstHeliSpotting) {
         gFirstHeliSpotting = false;
-        if (gSpotterWantedOn && IsEscapedPlayerCar()) SpotterWantedForEscapedCar();
-        VehicleReportOnFirstSighting();
+        if (gSpotterWantedOn && gSettings.EscapedCar && IsEscapedPlayerCar()) SpotterWantedForEscapedCar();
+        if (gSettings.VehicleReport) VehicleReportOnFirstSighting();
     }
 }
 
@@ -895,7 +1018,7 @@ void EAXCop::ReinitiatePursuitHook() {
 
 bool EAXCop::RemindAboutAirSupport(int type) {
     SoundAI* copspeech = SoundAI::Get();
-    if (type == Speech::kAirSupportBackup || gAirSupportRequest != kAirSupportHeard || gAirSupportReminded || copspeech == nullptr || IsHeliUp(copspeech))
+    if (!gSettings.FastAirReminder || type == Speech::kAirSupportBackup || gAirSupportRequest != kAirSupportHeard || gAirSupportReminded || copspeech == nullptr || IsHeliUp(copspeech))
         return false;
     gAirSupportReminded = true;
     gAirSupportReminderReply = true;
@@ -949,13 +1072,15 @@ Csis::Result Speech::Manager::IndirectSpeechEventHook(ScheduledSpeechEvent* evt,
         if (data != nullptr && size >= sizeof(Csis::Setup_VehicleReportStruct))
             ReportLiveSpeed(*static_cast<Csis::Setup_VehicleReportStruct*>(data), copspeech->GetPlayerSpeed());
     }
+    if (evt != nullptr && !test_only && evt->ID == kSPCH1_EventID_CallForBU && gAirSupportRequest == kAirSupportRequested && IsAirSupportCall(evt))
+        gAirSupportRequest = kAirSupportHeard;
     return IndirectSpeechEvent(evt, test_only);
 }
 
 SpeechValRtnType Speech::Manager::PostValidateHook(ScheduledSpeechEvent* evt, unsigned int mask) {
     SoundAI* copspeech = SoundAI::Get();
     if (evt != nullptr && copspeech != nullptr && evt->actor != nullptr && evt->actor == copspeech->GetHeli()) {
-        if (copspeech->GetHeli()->IsDead() && evt->ID != kSPCH1_EventID_HeliBailout)
+        if (gSettings.DeadHeliSilence && copspeech->GetHeli()->IsDead() && evt->ID != kSPCH1_EventID_HeliBailout)
             return kDitchEvt;
         if (evt->ID == kSPCH1_EventID_CallForRB)
             mask &= ~(kDepFollowCheck | kOnScreenOnlyCheck);
@@ -966,7 +1091,10 @@ SpeechValRtnType Speech::Manager::PostValidateHook(ScheduledSpeechEvent* evt, un
     } else if (evt != nullptr && evt->ID == kSPCH1_EventID_CallForBU && IsAirSupportCall(evt)) {
         mask &= ~kDepFollowCheck;
     }
-    return PostValidate(evt, mask);
+    const SpeechValRtnType result = PostValidate(evt, mask);
+    if (result == kDitchEvt && evt != nullptr && evt->ID == kSPCH1_EventID_CallForBU && gAirSupportRequest == kAirSupportRequested && IsAirSupportCall(evt))
+        gAirSupportRequest = kAirSupportWanted;
+    return result;
 }
 
 void Speech::Manager::CalcProbPlaybackHook() {
@@ -1014,7 +1142,8 @@ void SoundAI::SyncPursuitHook() {
     const int focus = GetFocus();
     SyncPursuit();
     if (gFastAirOn) RequestAirSupport();
-    if (!gSpotterWantedOn || focus != kLost || GetFocus() != kPursuitFlow) return;
+    if (gAnswer911On) AnswerHistoryRequest();
+    if (!gReacquireOn || focus != kLost || GetFocus() != kPursuitFlow) return;
     EAXAirSupport* heli = HeliWithOnlyLOS();
     gPilotReacquired = heli != nullptr;
     if (heli != nullptr) heli->SpotterWantedOnReacquire();
@@ -1022,22 +1151,14 @@ void SoundAI::SyncPursuitHook() {
 
 void SoundAI::RequestAirSupport() {
     gAirSupportReminderReply = false;
-    const int calls = Speech::Manager::GetHistory().GetCount(kSPCH1_EventID_CallForBU);
-    if (gAirSupportRequest == kAirSupportRequested) {
-        if (calls > gAirSupportCallCount)
-            gAirSupportRequest = kAirSupportHeard;
-        else if (!IsQueuedOrPlaying(kSPCH1_EventID_CallForBU))
-            gAirSupportRequest = kAirSupportWanted;
-        return;
-    }
     if (gAirSupportRequest != kAirSupportWanted || IsHeliUp(this) || GetPursuitState() != kActive || GetFocus() == kLost || mDispatch == nullptr
         || IsQueuedOrPlaying(kSPCH1_EventID_CallForBU))
         return;
     EAXCop* caller = FindAirSupportCaller(this);
     if (caller == nullptr) return;
-    gAirSupportCallCount = calls;
-    gAirSupportRequest = kAirSupportRequested;
     caller->EAXCop::CallForBackup(Speech::kAirSupportBackup);
+    if (!Speech::Manager::IsQueued(kSPCH1_EventID_CallForBU, kAllEventQueues)) return;
+    gAirSupportRequest = kAirSupportRequested;
     mDispatch->BackupReply(caller, 1, Speech::kAirSupportBackup);
 }
 
@@ -1045,6 +1166,39 @@ void SoundAI::TerminatePursuitHook(BailoutType type) {
     gPilotSearching = type != kForcedBail && GetHeli() != nullptr && GetNumActiveCopCars() == 0;
     TerminatePursuit(type);
     if (gPilotSearching) PilotCallsSearchPattern();
+}
+
+int MiscSpeech::Unit911ReplyHook(int spkrID) {
+    SoundAI* copspeech = SoundAI::Get();
+    if (copspeech != nullptr && copspeech->GetHeat() >= kLowestHeliHeat && !IsHeliUp(copspeech) && bRandom(1.0f) < kPilotTakes911Chance) {
+        gHistoryRequestTaken = false;
+        gHistoryRequestHeard = false;
+        spkrID = Speech::Heli;
+    }
+    return Unit911Reply(spkrID);
+}
+
+int SPCH::TakeLocationHook(const unsigned char* header, int take, int* offset, int* size) {
+    const int found = TakeLocation(header, take, offset, size);
+    uint16_t sample[2] = {};
+    if (found != 0 && take >= kFirstHistoryRequestTake && Memory::Read(reinterpret_cast<uintptr_t>(header), sample, sizeof(sample))
+        && sample[0] == kUnit911ReplySample && sample[1] == Speech::Heli) {
+        gHistoryRequestTaken = true;
+        gHistoryRequestHeard = false;
+    }
+    return found;
+}
+
+void SoundAI::AnswerHistoryRequest() {
+    if (!gHistoryRequestTaken) return;
+    if (Speech::Manager::IsCopSpeechPlaying(kSPCH1_EventID_Unit911Reply)) {
+        gHistoryRequestHeard = true;
+        return;
+    }
+    if (!gHistoryRequestHeard || mDispatch == nullptr) return;
+    gHistoryRequestTaken = false;
+    gHistoryRequestHeard = false;
+    mDispatch->EAXDispatch::DriverHistory();
 }
 
 int MiscSpeech::LostSuspectHook(int spkrID) {
@@ -1055,8 +1209,9 @@ int MiscSpeech::LostSuspectHook(int spkrID) {
     return LostSuspect(spkrID == Speech::Heli ? 0 : spkrID);
 }
 
-bool SoundAI::Init(void*) {
-    const bool intentToRam = kAnytimeEvents_IntentToRam.Verify()
+bool SoundAI::Init(void* module) {
+    LoadSettings(module);
+    const bool intentToRam = gSettings.RamLines && kAnytimeEvents_IntentToRam.Verify()
                           && Patch::ReplaceVirtual(kEAXAirSupportVTable, kIntentToRamSlot, kEAXCop_IntentToRam, Game::MethodAddress(&EAXAirSupport::IntentToRamHook));
     const bool pullBack = intentToRam
                        && Patch::Detour(kAIActionHeliPursuit_SkidHitPursuit, kSkidHitPursuitEntry, sizeof(kSkidHitPursuitEntry),
@@ -1067,7 +1222,7 @@ bool SoundAI::Init(void*) {
                           && Patch::RedirectCall(kSyncCarsToActorsAddNewHeliCall, kSoundAI_AddNewHeli, Game::MethodAddress(&SoundAI::AddNewHeliHook))
                           && Patch::ReplaceVirtual(kEAXAirSupportVTable, kSetHandleSlot, kEAXCharacter_SetHandle, Game::MethodAddress(&EAXAirSupport::SetHandleHook))
                           && Patch::ReplaceVirtual(kEAXAirSupportVTable, kSetLOSSlot, kEAXCharacter_SetLOS, Game::MethodAddress(&EAXAirSupport::SetLOSHook));
-    const bool beenHit = kInterrupts_InterruptRamHigh.Verify()
+    const bool beenHit = gSettings.BeenHit && kInterrupts_InterruptRamHigh.Verify()
                       && Patch::Detour(kSoundAI_OnCollision, kSoundAIOnCollisionEntry, sizeof(kSoundAIOnCollisionEntry),
                                        Game::MethodAddress(&Sim::Collision::IListener::OnCollisionHook), gSoundAIOnCollisionOriginal);
     const bool vehicleReport = respawnSpot && kSetup_VehicleReport.Verify()
@@ -1076,29 +1231,36 @@ bool SoundAI::Init(void*) {
     const bool postValidate = Patch::Detour(kManager_PostValidate, kPostValidateEntry, sizeof(kPostValidateEntry),
                                             reinterpret_cast<const void*>(&Speech::Manager::PostValidateHook), gPostValidateOriginal);
     const bool syncPursuit = Patch::RedirectCall(kOnTaskSyncPursuitCall, kSoundAI_SyncPursuit, Game::MethodAddress(&SoundAI::SyncPursuitHook));
-    gWeatherOn = syncPursuit && Memory::Matches(kObserverAssessWeatherRain, kAssessWeatherCode, sizeof(kAssessWeatherCode));
-    gWeatherReportOn = gWeatherOn && kAnytimeEvents_WeatherReport.Verify();
+    gWeatherOn = (gSettings.RainFlag || gSettings.WeatherReport) && syncPursuit
+              && Memory::Matches(kObserverAssessWeatherRain, kAssessWeatherCode, sizeof(kAssessWeatherCode));
+    gWeatherReportOn = gWeatherOn && gSettings.WeatherReport && kAnytimeEvents_WeatherReport.Verify();
     gSpotterWantedOn = respawnSpot && kSetup_SpotterWanted.Verify();
-    const bool reacquire = gSpotterWantedOn && syncPursuit
+    const bool reacquire = gSpotterWantedOn && gSettings.Reacquire && syncPursuit
                         && Patch::RedirectVirtualCall(kPrimaryBranchReinitiatePursuitCall, kPrimaryBranchReinitiatePursuitCode,
                                                       sizeof(kPrimaryBranchReinitiatePursuitCode), Game::MethodAddress(&EAXCop::ReinitiatePursuitHook));
+    gReacquireOn = reacquire;
     const bool heliDestroyed = kHeliSpecific_HeliBailout.Verify()
                             && Patch::ReplaceVirtual(kEAXAirSupportVTable, kBailoutSlot, kEAXAirSupport_Bailout, Game::MethodAddress(&EAXAirSupport::BailoutHook))
                             && Patch::ReplaceVirtual(kEAXAirSupportVTable, kUpdateSlot, kEAXAirSupport_Update, Game::MethodAddress(&EAXAirSupport::UpdateHook));
-    const bool roadblockAhead = kStaticRoadblock_CallForRB.Verify() && postValidate
+    const bool roadblockAhead = gSettings.RoadblockCall && kStaticRoadblock_CallForRB.Verify() && postValidate
                              && Patch::RedirectCall(kRoadblockFlowServiceSetupCall, kRoadblockFlow_Setup, Game::MethodAddress(&Speech::RoadblockFlow::SetupHook));
-    const bool searchPattern = kAnytimeEvents_LostSuspect.Verify()
+    const bool searchPattern = gSettings.SearchPattern && kAnytimeEvents_LostSuspect.Verify()
                             && Patch::RedirectCall(kTerminatePursuitLostSuspectCall, kMiscSpeech_LostSuspect, reinterpret_cast<const void*>(&MiscSpeech::LostSuspectHook))
                             && Patch::Detour(kSoundAI_TerminatePursuit, kTerminatePursuitEntry, sizeof(kTerminatePursuitEntry),
                                              Game::MethodAddress(&SoundAI::TerminatePursuitHook), gTerminatePursuitOriginal);
-    gFastAirOn = syncPursuit
+    gFastAirOn = gSettings.FastAirRequest && syncPursuit && vehicleReport && postValidate
               && Patch::Detour(kEAXDispatch_BackupReply, kBackupReplyEntry, sizeof(kBackupReplyEntry), Game::MethodAddress(&EAXDispatch::BackupReplyHook),
                                gBackupReplyOriginal)
               && Patch::ReplaceVirtual(kEAXCopVTable, kCallForBackupSlot, kEAXCop_CallForBackup, Game::MethodAddress(&EAXCop::CallForBackupHook))
               && Patch::ReplaceVirtual(kEAXCopVTable, kBackupReminderSlot, kEAXCop_BackupReminder, Game::MethodAddress(&EAXCop::BackupReminderHook));
-    const bool noDropoff = Patch::RedirectCall(kUpdateCalcProbPlaybackCall, kManager_CalcProbPlayback,
+    gAnswer911On = gSettings.Answer911 && syncPursuit
+                && Patch::RedirectCall(kObserverUnit911ReplyCall, kMiscSpeech_Unit911Reply, reinterpret_cast<const void*>(&MiscSpeech::Unit911ReplyHook))
+                && Patch::RedirectCall(kStartTakeLocationCall, kSPCH_TakeLocation, reinterpret_cast<const void*>(&SPCH::TakeLocationHook));
+    const bool noDropoff = gSettings.NoSpeechDropoff
+                        && Patch::RedirectCall(kUpdateCalcProbPlaybackCall, kManager_CalcProbPlayback,
                                                reinterpret_cast<const void*>(&Speech::Manager::CalcProbPlaybackHook));
-    return intentToRam || pullBack || respawnSpot || vehicleReport || reacquire || beenHit || heliDestroyed || roadblockAhead || searchPattern || noDropoff;
+    return intentToRam || pullBack || respawnSpot || vehicleReport || reacquire || beenHit || heliDestroyed || roadblockAhead || searchPattern || gAnswer911On
+        || noDropoff;
 }
 
 void SoundAI::Restore() {
