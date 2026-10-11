@@ -112,6 +112,7 @@ enum SPCHType_1_EventID {
     kSPCH1_EventID_HeliBailout   = 176,
     kSPCH1_EventID_SpotterWanted = 216,
     kSPCH1_EventID_InterruptRamHigh = 198,
+    kSPCH1_EventID_WeatherReport = 219,
 };
 
 enum SPCHType_EventRuleResult {
@@ -200,6 +201,13 @@ namespace Csis {
         Type_roadblock_type_Spikes             = 2,
     };
 
+    enum Type_heli_bailout_type {
+        Type_heli_bailout_type_flight_conditions = 1,
+        Type_heli_bailout_type_low_ammo          = 2,
+        Type_heli_bailout_type_fuel_low          = 4,
+        Type_heli_bailout_type_damage_sustained  = 8,
+    };
+
 }
 
 namespace Attrib {
@@ -254,6 +262,11 @@ namespace Csis {
     struct AnytimeEvents_RegainVisualStruct {
         int            speaker_id;
         Type_intensity intensity;
+    };
+
+    struct HeliSpecific_HeliBailoutStruct {
+        int                    speaker_id;
+        Type_heli_bailout_type heli_bailout_type;
     };
 
     struct StaticRoadblock_CallForRBStruct {
@@ -362,6 +375,21 @@ namespace Speech {
 
         unsigned char mSpeechFlow[0x10];
         Timer         mT_setup;
+    };
+
+    class PursuitFlow;
+    class StrategyFlow;
+
+    class Observer {
+      public:
+        bool WeatherExists() {
+            return mWeather;
+        }
+
+        void AssessWeather();
+
+        unsigned char mObservations[0x58];
+        bool          mWeather;
     };
 
 }
@@ -548,6 +576,8 @@ class EAXAirSupport : public EAXCop {
     void UpdateHook();
     void BailoutHook();
     void KillShot();
+    void StandDown();
+    void BailoutOutOfFuel();
     void SetLOSHook(bool yes);
     void IntentToRamHook();
     void IntentToRamPullBack();
@@ -556,6 +586,7 @@ class EAXAirSupport : public EAXCop {
     void SpotterWantedOnReacquire();
     void SpotterWantedForEscapedCar();
     void CallForRBAhead(IRoadBlock* roadblock);
+    void ReportWeather();
 };
 
 class AIActionHeliPursuit {
@@ -628,6 +659,10 @@ class SoundAI {
         return mHeli;
     }
 
+    EAXCop* GetLeader() {
+        return mLeader;
+    }
+
     int GetNumActiveCopCars() {
         return mNumActiveCopCars;
     }
@@ -646,6 +681,10 @@ class SoundAI {
 
     const int NumCopsWithLOS() {
         return mLOSCount;
+    }
+
+    Speech::Observer* GetObserver() {
+        return mObserver;
     }
 
     const Attrib::Gen::pvehicle& GetPlayerSpecs() {
@@ -691,6 +730,11 @@ class SoundAI {
     PursuitState   mPursuitState;
     unsigned char  mPursuitTimers[0x18];
     int            mNumActiveCopCars;
-    unsigned char  mCopsInViewAndTimers[0x3C];
+    int            mPlayerOffroadID;
+    unsigned char  mCopsInView;
+    Speech::PursuitFlow*  mPursuitFlow;
+    Speech::StrategyFlow* mStrategyFlow;
+    Speech::Observer*     mObserver;
+    unsigned char  mFlowsAndTimers[0x28];
     CarCustomizations* mPlayerCarCustom;
 };

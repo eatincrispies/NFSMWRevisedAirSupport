@@ -204,6 +204,18 @@ namespace {
     constexpr uintptr_t kAIActionHeliPursuit_SkidHitPursuit = 0x00412B40u;
     constexpr uint8_t   kSkidHitPursuitEntry[7]             = { 0x83, 0xEC, 0x70, 0x53, 0x56, 0x8B, 0xF1 };
     constexpr uintptr_t kEAXCop_CallForRB                   = 0x007196C0u;
+    constexpr uintptr_t kEAXCop_WeatherReport               = 0x00719B00u;
+    constexpr uintptr_t kPrecipitation                      = 0x009196B8u;
+    constexpr unsigned  kRainIntensity                      = 0x28Cu;
+    constexpr float     kWeatherReportIntensity             = 0.25f;
+    constexpr uintptr_t kgHeliVehicle                       = 0x0090D61Cu;
+    constexpr unsigned  kHeliFuelTimeRemaining              = 0x7D8u;
+    constexpr float     kHeliLowFuelTime                    = 8.0f;
+    constexpr uintptr_t kObserverAssessWeatherRain          = 0x0071A6DFu;
+    constexpr uint8_t   kAssessWeatherCode[46]              = { 0xA1, 0xB8, 0x96, 0x91, 0x00, 0x85, 0xC0, 0x75, 0x08, 0xD9, 0x05, 0x68,
+                                                                0x09, 0x89, 0x00, 0xEB, 0x06, 0xD9, 0x80, 0x8C, 0x02, 0x00, 0x00, 0xD8,
+                                                                0x15, 0xF0, 0x10, 0x89, 0x00, 0xDF, 0xE0, 0xF6, 0xC4, 0x41, 0x75, 0x49,
+                                                                0x8A, 0x41, 0x58, 0x84, 0xC0, 0x75, 0x42, 0xC6, 0x41, 0x58 };
     constexpr uintptr_t kSoundAI_GetRoadblock               = 0x00704E00u;
     constexpr uintptr_t kRoadblockFlow_Setup                = 0x0071EF50u;
     constexpr uintptr_t kRoadblockFlowServiceSetupCall      = 0x0071F486u;
@@ -284,10 +296,12 @@ namespace {
     constexpr SpeechEvent kSetup_SpotterWanted         = { "Setup_SpotterWanted",         0x00901BDCu, 0x47C75BA7u, 0x00992314u, kEAXCop_SpotterWanted,          0x05u };
     constexpr SpeechEvent kHeliSpecific_HeliBailout    = { "HeliSpecific_HeliBailout",    0x00901EDCu, 0x23945BA7u, 0x009924D4u, kEAXAirSupport_Bailout,         0x13u };
     constexpr SpeechEvent kStaticRoadblock_CallForRB   = { "StaticRoadblock_CallForRB",   0x00901CD4u, 0x7D0E5BA7u, 0x00992594u, kEAXCop_CallForRB,              0x32u };
+    constexpr SpeechEvent kAnytimeEvents_WeatherReport = { "AnytimeEvents_WeatherReport", 0x00901EA4u, 0x7F435BA7u, 0x0099236Cu, kEAXCop_WeatherReport,          0x05u };
 
     static_assert(offsetof(EAXCharacter, mSpeakerID) == 0x0C, "EAXCharacter::mSpeakerID");
     static_assert(offsetof(EAXCharacter, mSuspectLOS) == 0x36, "EAXCharacter::mSuspectLOS");
     static_assert(offsetof(SoundAI, mDispatch) == 0xD8, "SoundAI::mDispatch");
+    static_assert(offsetof(SoundAI, mLeader) == 0xDC, "SoundAI::mLeader");
     static_assert(offsetof(SoundAI, mHeli) == 0xE0, "SoundAI::mHeli");
     static_assert(offsetof(SoundAI, mNumActiveCopCars) == 0x1F0, "SoundAI::mNumActiveCopCars");
     static_assert(offsetof(AIActionHeliPursuit, mIRigidBody) == 0x54, "AIActionHeliPursuit::mIRigidBody");
@@ -302,6 +316,9 @@ namespace {
     static_assert(offsetof(SoundAI, mLOSCount) == 0x148, "SoundAI::mLOSCount");
     static_assert(offsetof(SoundAI, mPVehicle) == 0x168, "SoundAI::mPVehicle");
     static_assert(offsetof(SoundAI, mPlayerCarCustom) == 0x230, "SoundAI::mPlayerCarCustom");
+    static_assert(offsetof(SoundAI, mPursuitFlow) == 0x1FC, "SoundAI::mPursuitFlow");
+    static_assert(offsetof(SoundAI, mObserver) == 0x204, "SoundAI::mObserver");
+    static_assert(offsetof(Speech::Observer, mWeather) == 0x58, "Speech::Observer::mWeather");
     static_assert(offsetof(Attrib::Gen::pvehicle, mLayoutPtr) == 0x08, "Attrib::Gen::pvehicle::mLayoutPtr");
     static_assert(offsetof(Attrib::Gen::pvehicle::_LayoutStruct, VerbalType) == 0x40, "Attrib::Gen::pvehicle::VerbalType");
     static_assert(offsetof(SoundAI, mNumActiveCopCars) == 0x1F0, "SoundAI::mNumActiveCopCars");
@@ -330,7 +347,11 @@ namespace {
     bool                 gFirstHeliSpotting     = false;
     bool                 gSpotterWantedOn       = false;
     bool                 gPilotReacquired       = false;
-    bool                 gKillShotSaid          = false;
+    bool                 gHeliDestroyed         = false;
+    float                gHeliFuelTimeRemaining = -1.0f;
+    bool                 gWeatherOn             = false;
+    bool                 gWeatherReportOn       = false;
+    bool                 gWeatherReported       = false;
     Timer                gRoadblockSetupHeard   = { -1 };
 
     struct DescribedCar {
@@ -394,6 +415,10 @@ IRoadBlock* SoundAI::GetRoadblock() {
 
 void EAXCop::VehicleReport() {
     Game::ThisCall<void>(kEAXCop_VehicleReport, this);
+}
+
+void EAXCop::WeatherReport() {
+    Game::ThisCall<void>(kEAXCop_WeatherReport, this);
 }
 
 void EAXCop::SpotterWanted() {
@@ -489,6 +514,13 @@ namespace {
         return Speech::Manager::IsQueued(id, kAllEventQueues) || Speech::Manager::IsCopSpeechPlaying(id);
     }
 
+    float GetRainIntensity() {
+        const uintptr_t precipitation = Game::Global<uintptr_t>(kPrecipitation);
+        float intensity = 0.0f;
+        if (precipitation == 0 || !Memory::Read(precipitation + kRainIntensity, &intensity, sizeof(intensity))) return 0.0f;
+        return intensity;
+    }
+
     EAXAirSupport* HeliWithOnlyLOS() {
         SoundAI* copspeech = SoundAI::Get();
         EAXAirSupport* heli = copspeech != nullptr ? copspeech->GetHeli() : nullptr;
@@ -530,8 +562,15 @@ namespace {
         return copspeech != nullptr && DescribePlayerCar(copspeech, car) && FindEscapedCar(car) >= 0;
     }
 
+    void TrackHeliFuel() {
+        const uintptr_t heli = Game::Global<uintptr_t>(kgHeliVehicle);
+        float fuel = 0.0f;
+        if (heli != 0 && Memory::Read(heli + kHeliFuelTimeRemaining, &fuel, sizeof(fuel)) && fuel == fuel) gHeliFuelTimeRemaining = fuel;
+    }
+
     void HelicopterArrived() {
-        gKillShotSaid = false;
+        gHeliDestroyed = false;
+        gHeliFuelTimeRemaining = -1.0f;
         if (gHelisThisPursuit++ > 0)
             gRespawnedHeliSpotting = true;
         else
@@ -675,26 +714,64 @@ void EAXAirSupport::CallForRBAhead(IRoadBlock* roadblock) {
 }
 
 void EAXAirSupport::KillShot() {
-    gKillShotSaid = true;
+    gHeliDestroyed = true;
     if (Speech::Module* copSpeech = Speech::Manager::m_SpeechModule[COPSPEECH_MODULE]) copSpeech->ReleaseResource();
     Speech::Manager::ClearPlayback();
     if (Speech::History* history = Speech::Manager::GetHistory().Find(kSPCH1_EventID_HeliBailout)) history->count = 0;
     EAXAirSupport::Bailout();
 }
 
+void EAXAirSupport::StandDown() {
+    SoundAI* copspeech = SoundAI::Get();
+    if (copspeech != nullptr && copspeech->GetLeader() == this) copspeech->mLeader = nullptr;
+}
+
+void EAXAirSupport::ReportWeather() {
+    SoundAI* copspeech = SoundAI::Get();
+    Speech::Observer* observer = copspeech != nullptr ? copspeech->GetObserver() : nullptr;
+    if (observer == nullptr || !observer->WeatherExists()) {
+        gWeatherReported = false;
+        return;
+    }
+    if (gWeatherReported || !IsActive() || IsQueuedOrPlaying(kSPCH1_EventID_WeatherReport)) return;
+    gWeatherReported = true;
+    EAXCop::WeatherReport();
+}
+
+void Speech::Observer::AssessWeather() {
+    const float rain = GetRainIntensity();
+    if (rain > kWeatherReportIntensity)
+        mWeather = true;
+    else if (rain <= 0.0f)
+        mWeather = false;
+}
+
 void EAXAirSupport::UpdateHook() {
     const bool wasDead = IsDead();
     EAXAirSupport::Update();
     if (IsDead()) {
-        if (!wasDead && !gKillShotSaid) KillShot();
+        if (!wasDead && !gHeliDestroyed) KillShot();
+        StandDown();
         return;
     }
     if (wasDead) HelicopterArrived();
-    gKillShotSaid = false;
+    gHeliDestroyed = false;
+    TrackHeliFuel();
+    if (gWeatherReportOn) ReportWeather();
+}
+
+void EAXAirSupport::BailoutOutOfFuel() {
+    Csis::HeliSpecific_HeliBailoutStruct data = { GetSpeakerID(), Csis::Type_heli_bailout_type_fuel_low };
+    ScheduleSpeech(data, kHeliSpecific_HeliBailout, this);
 }
 
 void EAXAirSupport::BailoutHook() {
-    if (!gKillShotSaid) EAXAirSupport::Bailout();
+    if (gHeliDestroyed) return;
+    if (gHeliFuelTimeRemaining >= 0.0f && gHeliFuelTimeRemaining < kHeliLowFuelTime && GetHealth() >= 1.0f) {
+        BailoutOutOfFuel();
+        return;
+    }
+    EAXAirSupport::Bailout();
 }
 
 void EAXAirSupport::SetHandleHook(HSIMABLE handle) {
@@ -763,6 +840,8 @@ Csis::Result Speech::Manager::IndirectSpeechEventHook(ScheduledSpeechEvent* evt,
 SpeechValRtnType Speech::Manager::PostValidateHook(ScheduledSpeechEvent* evt, unsigned int mask) {
     SoundAI* copspeech = SoundAI::Get();
     if (evt != nullptr && copspeech != nullptr && evt->actor != nullptr && evt->actor == copspeech->GetHeli()) {
+        if (copspeech->GetHeli()->IsDead() && evt->ID != kSPCH1_EventID_HeliBailout)
+            return kDitchEvt;
         if (evt->ID == kSPCH1_EventID_CallForRB)
             mask &= ~(kDepFollowCheck | kOnScreenOnlyCheck);
         else if (evt->ID == kSPCH1_EventID_SpotterWanted)
@@ -798,8 +877,9 @@ void SoundAI::ResetPursuitHook(bool including_music) {
     gHelisThisPursuit = 0;
     gRespawnedHeliSpotting = false;
     gFirstHeliSpotting = false;
-    gKillShotSaid = false;
+    gHeliDestroyed = false;
     gPilotReacquired = false;
+    gWeatherReported = false;
 }
 
 void SoundAI::AddNewHeliHook(IVehicle* heli) {
@@ -808,9 +888,10 @@ void SoundAI::AddNewHeliHook(IVehicle* heli) {
 }
 
 void SoundAI::SyncPursuitHook() {
+    if (gWeatherOn && mObserver != nullptr) mObserver->AssessWeather();
     const int focus = GetFocus();
     SyncPursuit();
-    if (focus != kLost || GetFocus() != kPursuitFlow) return;
+    if (!gSpotterWantedOn || focus != kLost || GetFocus() != kPursuitFlow) return;
     EAXAirSupport* heli = HeliWithOnlyLOS();
     gPilotReacquired = heli != nullptr;
     if (heli != nullptr) heli->SpotterWantedOnReacquire();
@@ -850,9 +931,11 @@ bool SoundAI::Init(void*) {
                                              reinterpret_cast<const void*>(&Speech::Manager::IndirectSpeechEventHook), gIndirectSpeechEventOriginal);
     const bool postValidate = Patch::Detour(kManager_PostValidate, kPostValidateEntry, sizeof(kPostValidateEntry),
                                             reinterpret_cast<const void*>(&Speech::Manager::PostValidateHook), gPostValidateOriginal);
+    const bool syncPursuit = Patch::RedirectCall(kOnTaskSyncPursuitCall, kSoundAI_SyncPursuit, Game::MethodAddress(&SoundAI::SyncPursuitHook));
+    gWeatherOn = syncPursuit && Memory::Matches(kObserverAssessWeatherRain, kAssessWeatherCode, sizeof(kAssessWeatherCode));
+    gWeatherReportOn = gWeatherOn && kAnytimeEvents_WeatherReport.Verify();
     gSpotterWantedOn = respawnSpot && kSetup_SpotterWanted.Verify();
-    const bool reacquire = gSpotterWantedOn
-                        && Patch::RedirectCall(kOnTaskSyncPursuitCall, kSoundAI_SyncPursuit, Game::MethodAddress(&SoundAI::SyncPursuitHook))
+    const bool reacquire = gSpotterWantedOn && syncPursuit
                         && Patch::RedirectVirtualCall(kPrimaryBranchReinitiatePursuitCall, kPrimaryBranchReinitiatePursuitCode,
                                                       sizeof(kPrimaryBranchReinitiatePursuitCode), Game::MethodAddress(&EAXCop::ReinitiatePursuitHook));
     const bool killShot = kHeliSpecific_HeliBailout.Verify()
